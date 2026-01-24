@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Narrative Canvas",
+  "description": "A high-end sequential image generation tool powered by Gemini 2.5 Flash Image. Generate up to 15 context-aware images with global styling rules and sequential image editing capabilities.",
+  "requestFramePermissions": []
+}
