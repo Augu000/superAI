@@ -1,4 +1,5 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -62,12 +63,19 @@
             mix-blend-mode: screen;
         }
     </style>
-  </head>
-
-  <body>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "uuid": "https://esm.sh/uuid@^13.0.0"
+  }
+}
+</script>
+</head>
+<body>
     <div id="root"></div>
-
-    <!-- ✅ Vite entry point (this is what you were missing) -->
-    <script type="module" src="/index.tsx"></script>
-  </body>
+</body>
 </html>
