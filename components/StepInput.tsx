@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ImageStep } from '../types';
 
@@ -8,133 +9,115 @@ interface StepInputProps {
   onDelete?: (id: string) => void;
   onGenerateTitle?: (id: string) => void;
   disabled?: boolean;
+  isSuggestingTitle?: boolean;
 }
 
-const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, disabled }) => {
-  const getLabel = () => {
+const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, disabled, isSuggestingTitle }) => {
+  const getTagStyles = () => {
     switch(step.type) {
-      case 'cover': return 'Book Cover';
-      case 'first': return 'First Page';
-      case 'last': return 'Last Page';
-      default: return `Story Spread ${index - 1}`;
+      case 'cover': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+      case 'first': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+      case 'last': return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
+      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
     }
   };
 
-  const getThemeColor = () => {
-    switch(step.type) {
-      case 'cover': return 'text-amber-400';
-      case 'first': return 'text-emerald-400';
-      case 'last': return 'text-rose-400';
-      default: return 'text-blue-400';
-    }
+  const getLabel = () => {
+    if (step.type === 'cover') return 'Book Cover';
+    if (step.type === 'first') return 'Intro Page';
+    if (step.type === 'last') return 'Closing Page';
+    return `Spread ${index - 1}`;
   };
 
   return (
-    <div className={`flex flex-col gap-3 p-4 rounded-xl glass-panel group transition-all border border-transparent ${
-      step.status === 'generating' ? 'border-blue-500/50 animate-pulse' : 'hover:border-white/10'
-    }`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-black uppercase tracking-widest ${getThemeColor()}`}>
-            {getLabel()}
-          </span>
-          {step.type === 'middle' && onDelete && !disabled && (
-            <button
-              onClick={() => onDelete(step.id)}
-              className="p-1 text-gray-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-              title="Delete Spread"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          )}
-        </div>
-        
-        {step.type === 'cover' ? (
-           <div className="flex items-center gap-2">
-             <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Text Overlay</span>
-             <button
-               disabled={disabled}
-               onClick={() => onUpdate(step.id, { showText: !step.showText })}
-               className={`w-7 h-4 rounded-full p-0.5 transition-all ${step.showText ? 'bg-amber-600' : 'bg-gray-800'}`}
-             >
-               <div className={`w-3 h-3 bg-white rounded-full transition-transform ${step.showText ? 'translate-x-3' : 'translate-x-0'}`} />
-             </button>
-           </div>
-        ) : (
-          <div className="flex items-center bg-gray-950 rounded-lg p-0.5 border border-gray-800">
-            {(['none', 'left', 'right'] as const).map((side) => (
-              <button
-                key={side}
-                disabled={disabled}
-                onClick={() => onUpdate(step.id, { textSide: side })}
-                className={`text-[9px] px-2 py-1 rounded transition-all capitalize font-bold ${
-                  step.textSide === side 
-                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/50' 
-                    : 'text-gray-600 hover:text-gray-400'
-                }`}
-              >
-                {side === 'none' ? 'Full' : `${side} Shadow`}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className={`relative flex gap-4 group transition-all ${disabled && !isSuggestingTitle ? 'opacity-50 grayscale' : ''}`}>
+      {/* Timeline Indicator */}
+      <div className="flex flex-col items-center">
+        <div className={`w-3 h-3 rounded-full border-2 border-slate-800 ${step.status === 'completed' ? 'bg-emerald-500' : 'bg-slate-700'}`} />
+        <div className="flex-1 w-0.5 bg-slate-800/50 mt-2 mb-2" />
       </div>
 
-      <div className="space-y-2">
+      <div className={`flex-1 glass-card rounded-2xl p-4 mb-4 ${step.status === 'generating' ? 'ring-2 ring-blue-500/50' : ''}`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+             <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${getTagStyles()}`}>
+              {getLabel()}
+            </span>
+            {step.status === 'completed' && (
+              <svg className="w-3 h-3 text-emerald-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            {step.type !== 'cover' && (
+              <div className="flex items-center gap-1 bg-slate-950/50 rounded-lg p-0.5 border border-white/5">
+                {(['none', 'left', 'right'] as const).map(side => (
+                  <button
+                    key={side}
+                    onClick={() => onUpdate(step.id, { textSide: side })}
+                    className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter transition-all ${step.textSide === side ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                  >
+                    {side}
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {step.type === 'cover' && (
+              <button 
+                onClick={() => onUpdate(step.id, { showText: !step.showText })}
+                className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border transition-all ${step.showText ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+              >
+                {step.showText ? 'Text On' : 'Text Off'}
+              </button>
+            )}
+
+            {step.type === 'middle' && onDelete && (
+              <button onClick={() => onDelete(step.id)} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              </button>
+            )}
+          </div>
+        </div>
+
         {(step.type === 'cover' || step.type === 'first' || step.type === 'last') && (
-          <div className={`grid grid-cols-2 gap-2 transition-opacity ${step.type === 'cover' && !step.showText ? 'opacity-20 pointer-events-none' : ''}`}>
-            <div className="relative group/input">
-              <input
-                type="text"
-                value={step.bookTitle || ''}
-                onChange={(e) => onUpdate(step.id, { bookTitle: e.target.value })}
-                placeholder="Title..."
-                disabled={disabled || (step.type === 'cover' && !step.showText)}
-                className="w-full bg-gray-900/50 border border-gray-800 rounded-lg pl-2 pr-8 py-1.5 text-xs text-white placeholder-gray-600 focus:border-blue-500 outline-none transition-colors"
+          <div className={`grid grid-cols-2 gap-2 mb-3 transition-opacity ${step.type === 'cover' && !step.showText ? 'opacity-20 pointer-events-none' : ''}`}>
+            <div className="relative">
+              <input 
+                value={step.bookTitle || ''} 
+                onChange={e => onUpdate(step.id, { bookTitle: e.target.value })}
+                placeholder="Story Title"
+                className="w-full bg-slate-900/50 border border-white/5 rounded-lg px-2 py-1.5 text-[10px] text-white focus:border-blue-500/50 outline-none"
               />
               {step.type === 'cover' && onGenerateTitle && (
-                <button
-                  onClick={() => onGenerateTitle(step.id)}
-                  disabled={disabled || !step.showText}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-amber-400 transition-colors"
-                  title="Generate suggested title"
+                <button 
+                  onClick={() => onGenerateTitle(step.id)} 
+                  disabled={isSuggestingTitle}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-amber-500/50 hover:text-amber-500 disabled:opacity-50"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+                  {isSuggestingTitle ? (
+                    <div className="w-3 h-3 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+                  ) : (
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a1 1 0 11-2 0zM13.657 15.657a1 1 0 001.414-1.414l-.707-.707a1 1 0 10-1.414 1.414l.707.707zM16 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1z" /></svg>
+                  )}
                 </button>
               )}
             </div>
-            <input
-              type="text"
-              value={step.cast || ''}
-              onChange={(e) => onUpdate(step.id, { cast: e.target.value })}
-              placeholder="Starring..."
-              disabled={disabled || (step.type === 'cover' && !step.showText)}
-              className="bg-gray-900/50 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:border-blue-500 outline-none transition-colors"
+            <input 
+              value={step.cast || ''} 
+              onChange={e => onUpdate(step.id, { cast: e.target.value })}
+              placeholder="Hero Name"
+              className="w-full bg-slate-900/50 border border-white/5 rounded-lg px-2 py-1.5 text-[10px] text-white focus:border-blue-500/50 outline-none"
             />
           </div>
         )}
 
-        <textarea
-          value={step.prompt}
-          onChange={(e) => onUpdate(step.id, { prompt: e.target.value })}
-          disabled={disabled}
-          placeholder={step.type === 'cover' ? "Describe the cover atmosphere..." : `Describe ${getLabel().toLowerCase()}...`}
-          className="w-full bg-transparent border-none focus:ring-0 text-gray-200 resize-none placeholder-gray-600 text-sm min-h-[60px] custom-scrollbar"
+        <textarea 
+          value={step.prompt} 
+          onChange={e => onUpdate(step.id, { prompt: e.target.value })}
+          placeholder="Enter visual description..."
+          className="w-full bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
         />
-      </div>
-      
-      <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/5">
-        <div className="flex gap-2">
-          {step.status === 'completed' && <span className="text-[9px] font-black text-emerald-400 uppercase tracking-tighter">Rendered</span>}
-          {step.status === 'error' && <span className="text-[9px] font-black text-rose-500 uppercase tracking-tighter">Error</span>}
-        </div>
-        {step.type === 'cover' && (
-          <span className="text-[8px] text-gray-500 font-bold uppercase italic tracking-widest">Seamless Full Canvas</span>
-        )}
       </div>
     </div>
   );
