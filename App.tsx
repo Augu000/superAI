@@ -5,6 +5,8 @@ import { ImageStep, GlobalRule, AspectRatio, GlobalConfig, ImageSize } from './t
 import { GeminiService } from './services/geminiService';
 import StepInput from './components/StepInput';
 import RuleInput from './components/RuleInput';
+import BookGenerator from "./components/BookGenerator";
+
 
 interface RenderedAsset {
   id: string;
@@ -45,6 +47,8 @@ const App: React.FC = () => {
     checkKey();
   }, []);
 
+
+
   const getGemini = () => new GeminiService();
   
   const handleSelectKey = async () => {
@@ -52,6 +56,9 @@ const App: React.FC = () => {
     await window.aistudio.openSelectKey();
     setHasKey(true);
   };
+
+
+
 
   const handleCharacterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -295,6 +302,26 @@ const App: React.FC = () => {
            </div>
         </div>
 
+          <BookGenerator
+  hasKey={hasKey}
+  onSelectKey={handleSelectKey}
+  disabled={isProcessActive || isSuggestingTitle}
+/>
+
+          <section className="glass-panel p-4 rounded-2xl border-l-4 border-l-purple-500 bg-purple-500/5">
+            <button onClick={() => setShowBulkImport(!showBulkImport)} className="flex items-center justify-between w-full">
+              <h2 className="text-[10px] font-black text-gray-100 uppercase tracking-widest">Bulk Story Ingest</h2>
+              <div className={`p-1 rounded-full bg-white/5 transition-transform ${showBulkImport ? 'rotate-180' : ''}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </div>
+            </button>
+            {showBulkImport && (
+              <div className="mt-4 space-y-3">
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder="Spread 1 (SCENE): ... &#10;COVER ..."
+                  className="w-full h-32 bg-gray-950 border border-gray-800 rounded-lg p-3 text-[10px] text-gray-300 focus:border-purple-500 outline-none resize-none font-mono"
         {/* Story Timeline */}
         <div className="lg:col-span-4 flex flex-col overflow-y-auto custom-scrollbar pr-2">
            <div className="flex items-center justify-between px-2 mb-6">
