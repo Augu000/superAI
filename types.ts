@@ -1,11 +1,15 @@
+
 export interface ImageStep {
   id: string;
   type: 'cover' | 'first' | 'middle' | 'last';
   prompt: string;
   bookTitle?: string;
   cast?: string;
-  showText?: boolean; // New property to toggle text overlays on cover
-  generatedImageUrl?: string;
+  storyStyle?: string; // AI-suggested visual style for typography (e.g., "weathered pirate wood")
+  showText?: boolean;
+  generatedImageUrl?: string; // Main image or background for cover
+  generatedTitleUrl?: string; // Separate title layer
+  generatedCastUrl?: string;  // Separate cast layer
   status: 'idle' | 'generating' | 'completed' | 'error';
   error?: string;
   textSide: 'left' | 'right' | 'none';
@@ -23,7 +27,7 @@ export interface GlobalConfig {
   aspectRatio: AspectRatio;
   imageSize: ImageSize;
   bleedPercent: number; // 0 to 20
-  demographicExclusion: boolean; // "black away" feature
+  demographicExclusion: boolean; // "Remove Black People" feature
 }
 
 export interface GenerationContext {
