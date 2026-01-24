@@ -5,6 +5,8 @@ import { ImageStep, GlobalRule, AspectRatio, GlobalConfig, ImageSize } from './t
 import { GeminiService } from './services/geminiService';
 import StepInput from './components/StepInput';
 import RuleInput from './components/RuleInput';
+import BookGenerator from "./components/BookGenerator";
+
 
 interface RenderedAsset {
   id: string;
@@ -33,17 +35,21 @@ const App: React.FC = () => {
   const [isSuggestingTitle, setIsSuggestingTitle] = useState(false);
   const [quickPasteText, setQuickPasteText] = useState('');
   const [showQuickPaste, setShowQuickPaste] = useState(false);
+  
+  // useEffect(() => {
+  //   const checkKey = async () => {
+  //     // @ts-ignore
+  //     const selected = await window.aistudio.hasSelectedApiKey();
+  //     setHasKey(selected);
+  //   };
+  //   checkKey();
+  // }, []);
   const [generationPhase, setGenerationPhase] = useState<'idle' | 'background' | 'title' | 'cast' | 'scene'>('idle');
   const [assets, setAssets] = useState<RenderedAsset[]>([]);
-  
+
   useEffect(() => {
-    const checkKey = async () => {
-      // @ts-ignore
-      const selected = await window.aistudio.hasSelectedApiKey();
-      setHasKey(selected);
-    };
-    checkKey();
-  }, []);
+  setHasKey(true); // local dev: use .env.local key
+}, []);
 
   const getGemini = () => new GeminiService();
   
@@ -52,6 +58,17 @@ const App: React.FC = () => {
     await window.aistudio.openSelectKey();
     setHasKey(true);
   };
+
+  // const handleSelectKey = async () => {
+  //   // @ts-ignore
+  //   await window.aistudio.openSelectKey();
+  //   setHasKey(true);
+  // };
+
+const handleSelectKey = async () => {
+  setHasKey(true);
+};
+
 
   const handleCharacterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -319,6 +336,77 @@ const App: React.FC = () => {
                 <span className="text-[8px] font-black uppercase tracking-[0.4em]">Append Step</span>
               </button>
            </div>
+            </div>
+          </section>
+
+          <section className="glass-panel p-5 rounded-2xl border-l-4 border-l-indigo-500">
+             <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[10px] font-black text-gray-100 uppercase tracking-widest">Aesthetic Rules</h2>
+              <button onClick={addRule} className="text-blue-400 hover:text-blue-300 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[100px] overflow-y-auto pr-1 custom-scrollbar">
+              {rules.length === 0 ? (
+                <p className="text-[9px] text-gray-600 italic uppercase">No rules defined.</p>
+              ) : (
+                rules.map(rule => <RuleInput key={rule.id} rule={rule} onUpdate={updateRule} onRemove={removeRule} />)
+              )}
+            </div>
+          </section>
+
+          <BookGenerator
+  hasKey={hasKey}
+  onSelectKey={handleSelectKey}
+  disabled={isProcessActive || isSuggestingTitle}
+/>
+
+          <section className="glass-panel p-4 rounded-2xl border-l-4 border-l-purple-500 bg-purple-500/5">
+            <button onClick={() => setShowBulkImport(!showBulkImport)} className="flex items-center justify-between w-full">
+              <h2 className="text-[10px] font-black text-gray-100 uppercase tracking-widest">Bulk Story Ingest</h2>
+              <div className={`p-1 rounded-full bg-white/5 transition-transform ${showBulkImport ? 'rotate-180' : ''}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </div>
+            </button>
+            {showBulkImport && (
+              <div className="mt-4 space-y-3">
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder="Spread 1 (SCENE): ... &#10;COVER ..."
+                  className="w-full h-32 bg-gray-950 border border-gray-800 rounded-lg p-3 text-[10px] text-gray-300 focus:border-purple-500 outline-none resize-none font-mono"
+                />
+                <button onClick={handleBulkDistribute} disabled={!bulkText.trim()} className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-900/50 text-white rounded-lg font-black text-[9px] uppercase tracking-widest transition-all">
+                  Process Narrative
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section className="flex flex-col gap-3 overflow-y-auto max-h-[calc(100vh-600px)] lg:max-h-[600px] pb-10 pr-1 custom-scrollbar">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Story Sequence</h3>
+              <button 
+                onClick={addSpread}
+                disabled={isProcessActive}
+                className="text-[9px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-widest transition-colors flex items-center gap-1"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+                Add Spread
+              </button>
+            </div>
+            {steps.map((step, idx) => (
+              <StepInput 
+                key={step.id} 
+                index={idx} 
+                step={step} 
+                onUpdate={updateStep} 
+                onDelete={step.type === 'middle' ? deleteStep : undefined}
+                onGenerateTitle={step.type === 'cover' ? handleGenerateTitle : undefined}
+                disabled={isProcessActive || isSuggestingTitle} 
+              />
+            ))}
+          </section>
         </div>
 
         {/* Master Monitor & Assets Stack */}
