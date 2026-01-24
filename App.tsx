@@ -48,8 +48,13 @@ const App: React.FC = () => {
   const [assets, setAssets] = useState<RenderedAsset[]>([]);
 
   useEffect(() => {
-  setHasKey(true); // local dev: use .env.local key
-}, []);
+    const checkKey = async () => {
+      // @ts-ignore
+      const selected = await window.aistudio.hasSelectedApiKey();
+      setHasKey(selected);
+    };
+    checkKey();
+  }, []);
 
   const getGemini = () => new GeminiService();
   
@@ -59,15 +64,14 @@ const App: React.FC = () => {
     setHasKey(true);
   };
 
-  // const handleSelectKey = async () => {
-  //   // @ts-ignore
-  //   await window.aistudio.openSelectKey();
-  //   setHasKey(true);
-  // };
 
-const handleSelectKey = async () => {
-  setHasKey(true);
-};
+  const handleSelectKey = async () => {
+    // @ts-ignore
+    await window.aistudio.openSelectKey();
+    setHasKey(true);
+  };
+
+
 
 
   const handleCharacterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
