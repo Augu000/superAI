@@ -4,6 +4,8 @@ import { ImageStep, GlobalRule, AspectRatio, GlobalConfig, ImageSize } from './t
 import { GeminiService } from './services/geminiService';
 import StepInput from './components/StepInput';
 import RuleInput from './components/RuleInput';
+import BookGenerator from "./components/BookGenerator";
+
 
 const MAX_MIDDLE_STEPS = 15;
 
@@ -39,22 +41,31 @@ const App: React.FC = () => {
   const [bulkText, setBulkText] = useState('');
   const [showBulkImport, setShowBulkImport] = useState(false);
   
+  // useEffect(() => {
+  //   const checkKey = async () => {
+  //     // @ts-ignore
+  //     const selected = await window.aistudio.hasSelectedApiKey();
+  //     setHasKey(selected);
+  //   };
+  //   checkKey();
+  // }, []);
+
   useEffect(() => {
-    const checkKey = async () => {
-      // @ts-ignore
-      const selected = await window.aistudio.hasSelectedApiKey();
-      setHasKey(selected);
-    };
-    checkKey();
-  }, []);
+  setHasKey(true); // local dev: use .env.local key
+}, []);
 
   const getGemini = () => new GeminiService();
 
-  const handleSelectKey = async () => {
-    // @ts-ignore
-    await window.aistudio.openSelectKey();
-    setHasKey(true);
-  };
+  // const handleSelectKey = async () => {
+  //   // @ts-ignore
+  //   await window.aistudio.openSelectKey();
+  //   setHasKey(true);
+  // };
+
+const handleSelectKey = async () => {
+  setHasKey(true);
+};
+
 
   const handleCharacterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -371,6 +382,12 @@ const App: React.FC = () => {
               )}
             </div>
           </section>
+
+          <BookGenerator
+  hasKey={hasKey}
+  onSelectKey={handleSelectKey}
+  disabled={isProcessActive || isSuggestingTitle}
+/>
 
           <section className="glass-panel p-4 rounded-2xl border-l-4 border-l-purple-500 bg-purple-500/5">
             <button onClick={() => setShowBulkImport(!showBulkImport)} className="flex items-center justify-between w-full">
