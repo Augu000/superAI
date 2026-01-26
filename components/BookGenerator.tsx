@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { BookInput, BookOutputs, BookTextService, Gender } from "../services/bookTextService";
 
 const inputBox =
@@ -16,7 +16,14 @@ export default function BookGenerator({
   onSelectKey: () => Promise<void>;
   disabled?: boolean;
 }) {
-  const service = useMemo(() => new BookTextService(), []);
+  const [service] = useState(() => {
+    try {
+      return new BookTextService();
+    } catch {
+      return null;
+    }
+  });
+
   const [input, setInput] = useState<BookInput>({
     name: "Lukas",
     age: "6",
@@ -29,8 +36,9 @@ export default function BookGenerator({
   const [outputs, setOutputs] = useState<BookOutputs>({});
   const [busy, setBusy] = useState<null | string>(null);
   const [selectedTitle, setSelectedTitle] = useState<string>("");
+  const [error, setError] = useState<string>("");
 
-  const isDisabled = !!disabled || !!busy;
+  const isDisabled = !!disabled || !!busy || !service;
 
   const ensureKey = async () => {
     if (!hasKey) await onSelectKey();
@@ -45,21 +53,22 @@ export default function BookGenerator({
     setInput((p) => ({ ...p, interests: arr }));
   };
 
-  const titlesList = useMemo(() => {
-    if (!outputs.titlesLt) return [];
-    return service.parseTitlesLt(outputs.titlesLt);
-  }, [outputs.titlesLt, service]);
+  const titlesList = service
+    ? (outputs.titlesLt ? service.parseTitlesLt(outputs.titlesLt) : [])
+    : [];
 
-  const chosenTitle = useMemo(() => {
-    if (!outputs.titlesLt) return selectedTitle || "";
-    return service.pickTitleFromTitlesLt(outputs.titlesLt, selectedTitle);
-  }, [outputs.titlesLt, selectedTitle, service]);
+  const chosenTitle = service && outputs.titlesLt
+    ? service.pickTitleFromTitlesLt(outputs.titlesLt, selectedTitle)
+    : selectedTitle || "";
 
   const run = async (label: string, fn: () => Promise<void>) => {
     try {
       setBusy(label);
+      setError("");
       await ensureKey();
       await fn();
+    } catch (err) {
+      setError((err instanceof Error ? err.message : String(err)) || "Unknown error");
     } finally {
       setBusy(null);
     }
@@ -75,6 +84,30 @@ export default function BookGenerator({
           </span>
         )}
       </div>
+
+      {!service && (
+        <div className="p-4 mb-4 bg-red-900/30 border border-red-700 rounded-lg">
+          <p className="text-[10px] text-red-200 font-semibold mb-2">⚠️ API Key Not Found</p>
+          <p className="text-[9px] text-red-100 mb-3">
+            The VITE_API_KEY environment variable is not set. On Netlify, you need to add it to your site's environment variables.
+          </p>
+          <div className="text-[9px] text-red-100 space-y-1">
+            <p><strong>Steps:</strong></p>
+            <ol className="list-decimal list-inside">
+              <li>Go to Netlify Site Settings → Build & Deploy → Environment</li>
+              <li>Add variable: <code className="bg-black/50 px-2 py-1">VITE_API_KEY</code></li>
+              <li>Set value to your Google AI API key</li>
+              <li>Redeploy your site</li>
+            </ol>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3 mb-4 bg-red-900/30 border border-red-700 rounded-lg">
+          <p className="text-[9px] text-red-200">{error}</p>
+        </div>
+      )}
 
       {/* INPUTS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
@@ -134,6 +167,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled}
           onClick={() =>
+            service &&
             run("Generating story", async () => {
               const storyLt = await service.generateStoryLt(input);
               setOutputs((p) => ({ ...p, storyLt }));
@@ -147,6 +181,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled || !outputs.storyLt}
           onClick={() =>
+            service &&
             run("Generating titles", async () => {
               const titlesLt = await service.generateTitlesLt(input, outputs.storyLt!);
               setOutputs((p) => ({ ...p, titlesLt }));
@@ -164,6 +199,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled || !outputs.storyLt}
           onClick={() =>
+            service &&
             run("Generating character anchor", async () => {
               const characterAnchorEn = await service.generateCharacterAnchorEn(input);
               setOutputs((p) => ({ ...p, characterAnchorEn }));
@@ -177,6 +213,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled || !outputs.storyLt || !outputs.characterAnchorEn}
           onClick={() =>
+            service &&
             run("Generating spread prompts", async () => {
               const spreadPromptsEn = await service.generateSpreadPromptsEn(outputs.storyLt!, outputs.characterAnchorEn!);
               setOutputs((p) => ({ ...p, spreadPromptsEn }));
@@ -190,6 +227,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled || !outputs.storyLt || !outputs.characterAnchorEn}
           onClick={() =>
+            service &&
             run("Generating cover prompt", async () => {
               const title = chosenTitle || "Untitled";
               const coverPromptEn = await service.generateCoverPromptEn(
@@ -210,6 +248,7 @@ export default function BookGenerator({
         <button
           disabled={isDisabled || !outputs.titlesLt}
           onClick={() =>
+            service &&
             run("Generating 3D title prompt", async () => {
               const title = chosenTitle || "Untitled";
               const titleLogoPromptEn = await service.generateTitleLogoPromptEn(title, input.theme);
