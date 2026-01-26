@@ -28,8 +28,10 @@ export const handler: Handler = async (event, context) => {
   }
 
   try {
+    console.log("generate-text function called");
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
+      console.error("API_KEY not set");
       return {
         statusCode: 500,
         headers: {
@@ -41,6 +43,7 @@ export const handler: Handler = async (event, context) => {
 
     const { prompt } = JSON.parse(event.body || "{}");
     if (!prompt) {
+      console.error("Prompt missing");
       return {
         statusCode: 400,
         headers: {
@@ -50,17 +53,39 @@ export const handler: Handler = async (event, context) => {
       };
     }
 
+    console.log("Calling Gemini API with model:", TEXT_MODEL);
+    console.log("Prompt length:", prompt.length);
+    
     const ai = new GoogleGenAI({ apiKey });
+    const startTime = Date.now();
+    console.log("Making API call...");
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     });
+    const duration = Date.now() - startTime;
+    console.log(`API call completed in ${duration}ms`);
+    console.log("Response type:", typeof response);
+    console.log("Response keys:", Object.keys(response || {}));
 
-    // SDK sometimes exposes `.text`, sometimes `.response.text()`.
-    const text =
-      (response as any)?.text ??
-      (response as any)?.response?.text?.() ??
-      "";
+    // Extract text from response - try multiple formats
+    let text = "";
+    if ((response as any)?.text) {
+      text = String((response as any).text);
+      console.log("Got text from response.text");
+    } else if ((response as any)?.response?.text) {
+      const textMethod = (response as any).response.text;
+      text = typeof textMethod === "function" ? String(textMethod()) : String(textMethod);
+      console.log("Got text from response.response.text()");
+    } else if ((response as any)?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      text = String((response as any).candidates[0].content.parts[0].text);
+      console.log("Got text from response.candidates[0].content.parts[0].text");
+    } else {
+      console.error("Could not extract text from response:", JSON.stringify(response, null, 2));
+      throw new Error("Could not extract text from API response");
+    }
+    
+    console.log("Extracted text length:", text.length);
 
     return {
       statusCode: 200,

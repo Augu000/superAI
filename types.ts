@@ -34,3 +34,20 @@ export interface GenerationContext {
   steps: ImageStep[];
   rules: GlobalRule[];
 }
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  savedAt: number;
+  // Book Generator data
+  bookInput?: any;
+  bookOutputs?: any;
+  selectedTitle?: string;
+  // Image Room data
+  steps: ImageStep[];
+  assets: Array<{ id: string; url: string; label: string; timestamp: number }>;
+  config: GlobalConfig;
+  characterRef: string | null;
+  rules: GlobalRule[];
+  quickPasteText: string;
+}

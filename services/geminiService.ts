@@ -98,7 +98,10 @@ export class GeminiService {
 1. NO TECHNICAL MARKS: Do not render any borders, crop marks, safe zones, margins, bleed lines, or bending lines.
 2. EDGE-TO-EDGE: The artwork must be a pure, continuous image reaching all four corners. `;
 
-    // NOTE: demographicExclusion intentionally NOT supported.
+    // Demographic exclusion
+    if (config.demographicExclusion) {
+      compositionContext += `CHARACTER DEMOGRAPHICS: Do not include any characters with dark skin tones or Black people in this image. `;
+    }
 
     let finalPromptText = "";
 

@@ -4,6 +4,17 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[dev]
+  command = "npm run dev"
+  targetPort = 3000
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["netlify/functions/**"]
+  
+[functions.generate-text]
+  timeout = 60
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

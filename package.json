@@ -1,4 +1,3 @@
-
 {
   "name": "gemini-narrative-canvas",
   "private": true,
@@ -6,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:netlify": "netlify dev",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
@@ -21,6 +21,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "netlify-cli": "^23.13.5",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
   }

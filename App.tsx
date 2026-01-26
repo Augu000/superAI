@@ -1,8 +1,9 @@
 // src/App.tsx
 import React, { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig } from "./types";
+import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, SavedProject } from "./types";
 import { GeminiService } from "./services/geminiService";
+import type { BookInput, BookOutputs } from "./services/bookTextService";
 
 import StepInput from "./components/StepInput";
 import RuleInput from "./components/RuleInput";
@@ -53,7 +54,6 @@ const App: React.FC = () => {
   const [rules, setRules] = useState<GlobalRule[]>([]);
   const [characterRef, setCharacterRef] = useState<string | null>(null);
 
-  // keep demographicExclusion forced OFF (not exposed in UI)
   const [config, setConfig] = useState<GlobalConfig>({
     aspectRatio: "16:9",
     imageSize: "1K",
@@ -74,6 +74,10 @@ const App: React.FC = () => {
   >("idle");
 
   const [assets, setAssets] = useState<RenderedAsset[]>([]);
+  const [activeRoom, setActiveRoom] = useState<"book" | "image">("book");
+  const [showSavedProjects, setShowSavedProjects] = useState(false);
+  const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
+  const [bookGeneratorKey, setBookGeneratorKey] = useState(0);
 
   const getGemini = () => new GeminiService();
 
@@ -164,7 +168,188 @@ const App: React.FC = () => {
     setShowQuickPaste(false);
   };
 
-  // BookGenerator → auto-fill QuickPaste → open the panel
+  // Load saved projects from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("savedProjects");
+      if (saved) {
+        setSavedProjects(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.error("Error loading saved projects:", e);
+    }
+  }, []);
+
+  // Save projects to localStorage whenever savedProjects changes
+  useEffect(() => {
+    try {
+      localStorage.setItem("savedProjects", JSON.stringify(savedProjects));
+    } catch (e) {
+      console.error("Error saving projects:", e);
+    }
+  }, [savedProjects]);
+
+  const saveCurrentProject = () => {
+    const projectName = prompt("Enter a name for this project:");
+    if (!projectName || !projectName.trim()) return;
+
+    // Get BookGenerator data from localStorage
+    const bookInput = localStorage.getItem("bookGenerator_input");
+    const bookOutputs = localStorage.getItem("bookGenerator_outputs");
+    const selectedTitle = localStorage.getItem("bookGenerator_selectedTitle");
+
+    const project: SavedProject = {
+      id: uuidv4(),
+      name: projectName.trim(),
+      savedAt: Date.now(),
+      bookInput: bookInput ? JSON.parse(bookInput) : undefined,
+      bookOutputs: bookOutputs ? JSON.parse(bookOutputs) : undefined,
+      selectedTitle: selectedTitle || undefined,
+      steps: [...steps],
+      assets: [...assets],
+      config: { ...config },
+      characterRef,
+      rules: [...rules],
+      quickPasteText,
+    };
+
+    setSavedProjects((prev) => [project, ...prev]);
+    setShowSavedProjects(false);
+  };
+
+  const loadProject = (project: SavedProject) => {
+    if (!confirm(`Load "${project.name}"? This will replace your current work.`)) return;
+
+    // Load BookGenerator data
+    if (project.bookInput) {
+      localStorage.setItem("bookGenerator_input", JSON.stringify(project.bookInput));
+    }
+    if (project.bookOutputs) {
+      localStorage.setItem("bookGenerator_outputs", JSON.stringify(project.bookOutputs));
+    }
+    if (project.selectedTitle) {
+      localStorage.setItem("bookGenerator_selectedTitle", project.selectedTitle);
+    }
+
+    // Load Image Room data
+    setSteps(project.steps.map(s => ({ ...s })));
+    setAssets(project.assets.map(a => ({ ...a })));
+    setConfig({ ...project.config });
+    setCharacterRef(project.characterRef);
+    setRules(project.rules.map(r => ({ ...r })));
+    setQuickPasteText(project.quickPasteText);
+
+    setShowSavedProjects(false);
+    // Force BookGenerator to reload by changing its key
+    setBookGeneratorKey((prev) => prev + 1);
+  };
+
+  const deleteProject = (projectId: string) => {
+    if (!confirm("Delete this saved project?")) return;
+    setSavedProjects((prev) => prev.filter((p) => p.id !== projectId));
+  };
+
+  // Enhanced function to intelligently transfer all BookGenerator text to Image Room
+  const transferAllTextToImageRoom = (
+    outputs: BookOutputs,
+    input: BookInput,
+    selectedTitle: string
+  ) => {
+    // Find existing steps
+    const coverStep = steps.find((s) => s.type === "cover");
+    const firstStep = steps.find((s) => s.type === "first");
+    const lastStep = steps.find((s) => s.type === "last");
+    const middleSteps = steps.filter((s) => s.type === "middle");
+
+    // Update cover step with cover prompt, title, and character name
+    if (coverStep) {
+      updateStep(coverStep.id, {
+        prompt: outputs.coverPromptEn || coverStep.prompt,
+        bookTitle: selectedTitle || coverStep.bookTitle,
+        cast: input.name || coverStep.cast,
+        showText: true,
+      });
+    }
+
+    // Update first/intro page with title
+    if (firstStep) {
+      // Extract intro text from storyLt if available
+      let introPrompt = "Cinematic Logo";
+      if (outputs.storyLt) {
+        const introMatch = outputs.storyLt.match(/Spread\s+1\s*\(TEXT\)\s*:?\s*(.+?)(?=Spread\s+2|$)/is);
+        if (introMatch) {
+          introPrompt = `Intro: ${introMatch[1].trim()}`;
+        }
+      }
+      updateStep(firstStep.id, {
+        prompt: introPrompt,
+        bookTitle: selectedTitle || firstStep.bookTitle,
+      });
+    }
+
+    // Parse and update middle spreads from spreadPromptsEn
+    if (outputs.spreadPromptsEn) {
+      const spreadChunks = outputs.spreadPromptsEn
+        .split(/\n(?=Spread\s+\d+\s+\(PROMPT\)\s*:)/gi)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      // Create new middle steps from parsed spreads and replace all steps in one batch
+      setSteps((prevSteps) => {
+        const cover = prevSteps.find((s) => s.type === "cover")!;
+        const first = prevSteps.find((s) => s.type === "first")!;
+        const last = prevSteps.find((s) => s.type === "last")!;
+
+        const newMiddleSteps: ImageStep[] = spreadChunks.map((chunk) => {
+          const cleanPrompt = chunk.replace(/Spread\s+\d+\s*\(PROMPT\)\s*:?\s*/gi, "").trim();
+          return {
+            id: uuidv4(),
+            type: "middle" as const,
+            prompt: cleanPrompt || "",
+            status: "idle" as const,
+            textSide: "none" as const,
+          };
+        });
+
+        return [cover, first, ...newMiddleSteps, last];
+      });
+    }
+
+    // Update last/closing page
+    if (lastStep) {
+      // Extract closing text from storyLt if available
+      let closingPrompt = "Closing Card";
+      if (outputs.storyLt) {
+        const closingMatch = outputs.storyLt.match(/Spread\s+14\s*\(TEXT\)\s*:?\s*(.+?)$/is);
+        if (closingMatch) {
+          closingPrompt = `Closing: ${closingMatch[1].trim()}`;
+        }
+      }
+      updateStep(lastStep.id, {
+        prompt: closingPrompt,
+      });
+    }
+
+    // Also populate quick paste for backward compatibility
+    const blocks: string[] = [];
+    if (outputs.coverPromptEn) {
+      blocks.push(`COVER: ${outputs.coverPromptEn}`);
+    }
+    if (outputs.spreadPromptsEn) {
+      const spreadChunks = outputs.spreadPromptsEn
+        .split(/\n(?=Spread\s+\d+\s+\(PROMPT\)\s*:)/gi)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      spreadChunks.forEach((chunk) => {
+        blocks.push(chunk.replace(/\(PROMPT\)/gi, "(SCENE)"));
+      });
+    }
+    if (blocks.length > 0) {
+      setQuickPasteText(blocks.join("\n\n"));
+    }
+  };
+
+  // BookGenerator → auto-fill QuickPaste → open the panel (legacy function, kept for compatibility)
   const ingestPromptsToTimeline = (
     scenePrompts: string,
     coverPrompt: string,
@@ -332,56 +517,102 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col p-4 md:p-8 max-w-[1750px] mx-auto gap-8">
       {/* Studio Header */}
-      <header className="flex flex-col lg:flex-row items-center justify-between gap-6 pb-6 border-b border-white/5">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/10">
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
+      <header className="flex flex-col gap-6 pb-6 border-b border-white/5">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-black font-display tracking-tight text-white uppercase italic leading-none">
+                Nano Canvas
+              </h1>
+              <p className="text-slate-500 text-[7px] font-black uppercase tracking-[0.4em] mt-1">
+                Professional Print Architecture
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-black font-display tracking-tight text-white uppercase italic leading-none">
-              Nano Canvas
-            </h1>
-            <p className="text-slate-500 text-[7px] font-black uppercase tracking-[0.4em] mt-1">
-              Professional Print Architecture
-            </p>
+
+          <div className="flex items-center gap-4">
+            {activeRoom === "image" && (
+              <>
+                <button
+                  onClick={startNarrativeFlow}
+                  disabled={isProcessActive || steps.every((s) => !s.prompt.trim())}
+                  className={`px-10 py-3 rounded font-black text-[9px] uppercase tracking-[0.2em] transition-all ${
+                    isProcessActive
+                      ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-500 text-white shadow active:scale-95"
+                  }`}
+                >
+                  {isProcessActive ? "Session Active" : "Initiate Render"}
+                </button>
+                <div className="h-6 w-px bg-white/5 mx-2" />
+                <button
+                  onClick={() => {
+                    setSteps(createInitialSteps());
+                    setAssets([]);
+                  }}
+                  className="text-[8px] font-bold text-slate-500 hover:text-white uppercase tracking-widest transition-colors"
+                >
+                  New Session
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        {/* Room Selector Menu */}
+        <div className="flex items-center gap-2 justify-between w-full">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveRoom("book")}
+              className={`px-6 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all ${
+                activeRoom === "book"
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                  : "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700"
+              }`}
+            >
+              Book Generator
+            </button>
+            <button
+              onClick={() => setActiveRoom("image")}
+              className={`px-6 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all ${
+                activeRoom === "image"
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                  : "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700"
+              }`}
+            >
+              Image Room
+            </button>
+          </div>
+
+          {/* Saved Content Button */}
           <button
-            onClick={startNarrativeFlow}
-            disabled={isProcessActive || steps.every((s) => !s.prompt.trim())}
-            className={`px-10 py-3 rounded font-black text-[9px] uppercase tracking-[0.2em] transition-all ${
-              isProcessActive
-                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-500 text-white shadow active:scale-95"
-            }`}
+            onClick={() => setShowSavedProjects(true)}
+            className="p-2 rounded-lg font-black transition-all bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center"
+            title="Saved Content"
           >
-            {isProcessActive ? "Session Active" : "Initiate Render"}
-          </button>
-          <div className="h-6 w-px bg-white/5 mx-2" />
-          <button
-            onClick={() => {
-              setSteps(createInitialSteps());
-              setAssets([]);
-            }}
-            className="text-[8px] font-bold text-slate-500 hover:text-white uppercase tracking-widest transition-colors"
-          >
-            New Session
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
           </button>
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 overflow-hidden">
-        {/* Sidebar Controls */}
-        <div className="lg:col-span-3 flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
+      {activeRoom === "book" ? (
+        <div className="w-full">
+          <BookGenerator 
+            key={bookGeneratorKey}
+            onTransferToImageRoom={(outputs, input, selectedTitle) => {
+              // Intelligently transfer all text to Image Room with proper sorting
+              transferAllTextToImageRoom(outputs, input, selectedTitle);
+              // Switch to Image Room
+              setActiveRoom("image");
+            }}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 overflow-hidden">
+          {/* Sidebar Controls */}
+          <div className="lg:col-span-3 flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
           <div className="glass-panel p-6 rounded space-y-6">
             <h2 className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
               <div className="w-1 h-1 rounded-full bg-blue-500" />
@@ -393,7 +624,7 @@ const App: React.FC = () => {
                 {(["16:9", "4:3", "1:1"] as AspectRatio[]).map((ratio) => (
                   <button
                     key={ratio}
-                    onClick={() => setConfig((c) => ({ ...c, aspectRatio: ratio, demographicExclusion: false }))}
+                    onClick={() => setConfig((c) => ({ ...c, aspectRatio: ratio }))}
                     className={`py-1.5 text-[8px] font-black rounded border transition-all ${
                       config.aspectRatio === ratio
                         ? "bg-blue-600 border-blue-500 text-white"
@@ -405,10 +636,12 @@ const App: React.FC = () => {
                 ))}
               </div>
 
-              {/* NOTE: demographicExclusion intentionally not exposed in UI */}
-              <p className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">
-                Demographic exclusion: OFF
-              </p>
+              <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-white/5 group cursor-pointer" onClick={() => setConfig(c => ({...c, demographicExclusion: !c.demographicExclusion}))}>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Remove Black People</span>
+                <div className={`w-7 h-3.5 rounded-full p-0.5 transition-all ${config.demographicExclusion ? 'bg-blue-600' : 'bg-slate-800'}`}>
+                  <div className={`w-2.5 h-2.5 bg-white rounded-full transition-transform ${config.demographicExclusion ? 'translate-x-3.5' : ''}`} />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -474,9 +707,6 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-
-          {/* NEW: Book text + prompts generator */}
-          <BookGenerator />
         </div>
 
         {/* Story Timeline */}
@@ -675,7 +905,92 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      )}
+
+      {/* Saved Projects Modal */}
+      {showSavedProjects && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowSavedProjects(false)}>
+          <div className="glass-panel rounded-2xl p-6 max-w-md w-full mx-4 border border-white/10 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-black text-white uppercase tracking-widest">Saved Projects</h3>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveCurrentProject}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-black text-[9px] uppercase tracking-widest transition-all"
+                >
+                  Save Current
+                </button>
+                <button
+                  onClick={() => setShowSavedProjects(false)}
+                  className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+              {savedProjects.length === 0 ? (
+                <div className="py-12 text-center">
+                  <svg className="w-12 h-12 mx-auto mb-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                  <p className="text-xs text-slate-500 font-black uppercase tracking-widest">No saved projects</p>
+                  <p className="text-[9px] text-slate-600 mt-2">Click "Save Current" to save your work</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {savedProjects.map((project) => (
+                    <div
+                      key={project.id}
+                      className="group p-4 bg-slate-900/50 rounded-lg border border-white/5 hover:border-white/20 transition-all"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <h4 className="text-xs font-black text-white uppercase tracking-tight mb-1">{project.name}</h4>
+                          <p className="text-[9px] text-slate-400">
+                            Saved {new Date(project.savedAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => deleteProject(project.id)}
+                          className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[8px] text-slate-500 font-black uppercase tracking-widest">
+                        <div>
+                          <span className="text-slate-600">Steps:</span> {project.steps.length}
+                        </div>
+                        <div>
+                          <span className="text-slate-600">Assets:</span> {project.assets.length}
+                        </div>
+                        {project.bookOutputs && (
+                          <div className="col-span-2">
+                            <span className="text-slate-600">Has Book Data:</span> Yes
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => loadProject(project)}
+                        className="w-full mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[9px] uppercase tracking-widest transition-all"
+                      >
+                        Load Project
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

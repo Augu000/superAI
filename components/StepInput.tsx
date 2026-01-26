@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { ImageStep } from '../types';
 
 interface StepInputProps {
@@ -13,6 +13,22 @@ interface StepInputProps {
 }
 
 const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, disabled, isSuggestingTitle }) => {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleDeleteClick = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (onDelete) {
+      onDelete(step.id);
+    }
+    setShowDeleteConfirm(false);
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirm(false);
+  };
   const getTagStyles = () => {
     switch(step.type) {
       case 'cover': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
@@ -73,7 +89,7 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
             )}
 
             {step.type === 'middle' && onDelete && (
-              <button onClick={() => onDelete(step.id)} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100">
+              <button onClick={handleDeleteClick} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
               </button>
             )}
@@ -119,6 +135,34 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
           className="w-full bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
         />
       </div>
+
+      {/* Delete Confirmation Popup */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="glass-panel rounded-2xl p-6 max-w-md w-full mx-4 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4">
+              Confirm Deletion
+            </h3>
+            <p className="text-xs text-slate-300 mb-6">
+              Do you really want to delete this spread? This action cannot be undone.
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-black text-[10px] uppercase tracking-widest transition-all"
+              >
+                Delete
+              </button>
+              <button
+                onClick={handleCancelDelete}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
