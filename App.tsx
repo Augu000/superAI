@@ -534,18 +534,6 @@ const App: React.FC = () => {
             {activeRoom === "image" && (
               <>
                 <button
-                  onClick={startNarrativeFlow}
-                  disabled={isProcessActive || steps.every((s) => !s.prompt.trim())}
-                  className={`px-10 py-3 rounded font-black text-[9px] uppercase tracking-[0.2em] transition-all ${
-                    isProcessActive
-                      ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-500 text-white shadow active:scale-95"
-                  }`}
-                >
-                  {isProcessActive ? "Session Active" : "Initiate Render"}
-                </button>
-                <div className="h-6 w-px bg-white/5 mx-2" />
-                <button
                   onClick={() => {
                     setSteps(createInitialSteps());
                     setAssets([]);
@@ -753,6 +741,21 @@ const App: React.FC = () => {
 
         {/* Master Monitor & Assets Stack */}
         <div className="lg:col-span-5 flex flex-col gap-8 overflow-y-auto custom-scrollbar">
+          {/* Initiate Render Button */}
+          <div className="flex justify-end">
+            <button
+              onClick={startNarrativeFlow}
+              disabled={isProcessActive || steps.every((s) => !s.prompt.trim())}
+              className={`w-1/3 px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all ${
+                isProcessActive || steps.every((s) => !s.prompt.trim())
+                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                  : "bg-[#3355FF] hover:bg-[#2a44cc] text-white shadow-lg shadow-[#3355FF]/20 active:scale-95"
+              }`}
+            >
+              INITIATE RENDER
+            </button>
+          </div>
+          
           {/* Monitor */}
           <div className="glass-panel rounded p-6 md:p-8 flex flex-col relative shrink-0 overflow-hidden">
             <div className="flex items-center justify-between mb-6">
