@@ -496,7 +496,6 @@ const App: React.FC = () => {
           <BookGenerator
             hasKey={hasKey}
             onSelectKey={handleSelectKey}
-            onQuickPastePrompts={ingestPromptsToTimeline}
           />
         </div>
 

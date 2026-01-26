@@ -42,7 +42,7 @@ export class BookTextService {
       model: TEXT_MODEL,
       contents: prompt,
     });
-    return cleanText(response.text);
+    return cleanText(response.text || "");
   }
 
   parseTitlesLt(titlesLt: string): string[] {
