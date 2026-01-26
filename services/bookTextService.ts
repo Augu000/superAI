@@ -17,12 +17,19 @@ export interface BookInput {
   interests: string[];
   theme: string;
   lesson: string;
+
+  /**
+   * Optional: you can store a short descriptor like "use reference photo outfit"
+   * or an id/url if you later want to pass it to the image model prompt.
+   * Not required for text generation, but helpful for wiring.
+   */
+  // referenceImageUrl?: string;
 }
 
 export interface BookOutputs {
   storyLt?: string;
   titlesLt?: string;
-  visualStyleTokenEn?: string; // NEW: derived visual-world token
+  visualStyleTokenEn?: string;
   characterAnchorEn?: string;
   spreadPromptsEn?: string;
   coverPromptEn?: string;
@@ -54,52 +61,42 @@ const TITLE_STYLE_MAP: Record<VisualStyleToken, string> = {
 STYLE: playful sci-fi, glossy plastic or holographic acrylic letters, soft neon edge glow, rounded shapes
 DETAILS: subtle UI-like light strips and micro-lines (minimal), clean tech accents, friendly and modern
 `,
-
   magical: `
 STYLE: storybook magic, soft glowing paint or crystal-like letters, sparkles and fairy dust
 DETAILS: gentle light trails, dreamy gradients, warm enchanted glow (NOT dark)
 `,
-
   cozy: `
 STYLE: warm illustrated letters, painted 3D or paper-cut craft feel, soft shadows
 DETAILS: rounded friendly shapes, pastel tones, comforting vibe
 `,
-
   adventurous: `
 STYLE: bold animated letters, colorful enamel/painted 3D, dynamic tilt (fun action energy)
 DETAILS: bright highlights, lively motion feel, playful not intense
 `,
-
   pirate: `
 STYLE: playful cartoon adventure, painted wood letters (bright, clean), rope accents
 DETAILS: sunny warm tones, fun swashbuckling mood (NOT scary), no metal
 `,
-
   fantasy: `
 STYLE: classic animated fantasy, luminous crystal or soft magical stone (light and friendly)
 DETAILS: gentle aura, sparkles, warm glow (NO runes, NO dark epic mood)
 `,
-
   nature: `
 STYLE: bright nature storybook, painted 3D letters with leaf/flower accents
 DETAILS: soft sunlight glow, friendly organic shapes, clean and cheerful
 `,
-
   city: `
 STYLE: modern playful city vibe, glossy painted letters, subtle geometric accents
 DETAILS: clean lines, bright pop colors, friendly and contemporary
 `,
-
   bedtime: `
 STYLE: dreamy bedtime letters, cloud-like plush texture or soft glowing fabric
 DETAILS: calm moonlight glow, gentle stars/bokeh, soothing palette
 `,
-
   playful: `
 STYLE: chunky toy-like letters, foam/plastic texture, candy-bright colors
 DETAILS: fun shine, rounded shapes, high readability
 `,
-
   educational: `
 STYLE: clean friendly learning vibe, bright plastic letters, minimal icons (book, star, shapes)
 DETAILS: tidy, simple, readable, cheerful
@@ -121,9 +118,7 @@ export class BookTextService {
   private async run(prompt: string): Promise<string> {
     const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
     });
 
@@ -186,6 +181,7 @@ OUTPUT FORMAT (STRICT):
 Spread 1 (TEXT): ...
 ...
 Spread 14 (TEXT): ...`;
+
     return await this.run(prompt);
   }
 
@@ -210,10 +206,10 @@ OUTPUT FORMAT (STRICT):
 3. [Category]: [Title]
 4. [Category]: [Title]
 5. [Category]: [Title]`;
+
     return await this.run(prompt);
   }
 
-  // NEW: derive the story's "visual world" token (so typography/covers match story)
   async generateVisualStyleTokenEn(storyLt: string, theme: string): Promise<string> {
     const prompt = `You are a children's animation art director.
 
@@ -233,6 +229,7 @@ Rules:
 - Do NOT invent new tokens
 
 Return ONLY the token.`;
+
     return await this.run(prompt);
   }
 
@@ -244,7 +241,6 @@ Return ONLY the token.`;
   ): Promise<string> {
     const title = cleanText(storyTitle);
 
-    // Prefer provided token; otherwise derive from story+theme if story is available
     let token: VisualStyleToken = "playful";
     if (visualStyleTokenEn) {
       token = normalizeToken(visualStyleTokenEn);
@@ -289,27 +285,37 @@ Return ONLY the final prompt string.`;
     return await this.run(prompt);
   }
 
+  /**
+   * UPDATED: Character Anchor must NOT invent clothing.
+   * We explicitly force: "use outfit from reference photo" and forbid describing outfit/colors.
+   */
   async generateCharacterAnchorEn(input: BookInput): Promise<string> {
-    const prompt = `Create a CHARACTER ANCHOR for a children's book character.
+    const prompt = `Create a CHARACTER ANCHOR for a children's book character that will be generated from a REFERENCE PHOTO of the child.
 
 Age: ${input.age}
 Gender: ${input.gender}
 Interests: ${input.interests.join(", ")}
 Theme: ${input.theme}
 
-RULES:
-- NO hair/eye/skin color
-- NO ethnicity
-- Compatible with any child appearance
-- Keep it consistent and reusable across all images
+STRICT RULES:
+- Do NOT describe clothing, outfit, shoes, accessories, or colors (the reference photo defines them)
+- Do NOT describe hair/eye/skin color
+- Do NOT mention ethnicity
+- Keep identity consistent with the reference photo across all images
+- You MAY describe only: age-appropriate vibe, expression range, proportions, and animation style
 
-Describe: age, vibe, art style.
+Write as an instruction line that tells the image model:
+"Use the child's exact appearance and outfit from the reference photo."
 
 FORMAT: One line only.
 Return ONLY the anchor line.`;
+
     return await this.run(prompt);
   }
 
+  /**
+   * UPDATED: Spread prompts must reinforce the "reference photo outfit" rule and avoid outfit details.
+   */
   async generateSpreadPromptsEn(
     storyLt: string,
     characterAnchor: string,
@@ -322,7 +328,7 @@ Return ONLY the anchor line.`;
 STORY (Lithuanian):
 ${storyLt}
 
-CHARACTER ANCHOR:
+CHARACTER ANCHOR (must be obeyed):
 ${characterAnchor}
 
 VISUAL WORLD TOKEN:
@@ -330,6 +336,10 @@ ${token}
 
 ART STYLE (base):
 3D animated movie quality, Pixar-like, clean render, soft volumetric lighting
+
+GLOBAL CHARACTER RULES (STRICT):
+- Use the child's exact face, hair, body proportions AND outfit from the REFERENCE PHOTO
+- Do NOT describe clothing or colors in prompts (the photo defines them)
 
 COMPOSITION RULES:
 - Character NEVER centered: place on LEFT-THIRD or RIGHT-THIRD only
@@ -344,6 +354,9 @@ Spread 14 (PROMPT): ...`;
     return await this.run(prompt);
   }
 
+  /**
+   * UPDATED: Cover prompt must also enforce reference-photo outfit and forbid outfit descriptions.
+   */
   async generateCoverPromptEn(
     storyLt: string,
     name: string,
@@ -364,8 +377,12 @@ Character name: ${name}
 THEME INPUT: ${theme}
 VISUAL WORLD TOKEN: ${token}
 
-CHARACTER ANCHOR:
+CHARACTER ANCHOR (must be obeyed):
 ${characterAnchor}
+
+GLOBAL CHARACTER RULES (STRICT):
+- Use the child's exact face, hair, proportions AND outfit from the REFERENCE PHOTO
+- Do NOT describe clothing or colors (the photo defines them)
 
 GOAL:
 - Capture the emotional heart + iconic moment(s) of the story
