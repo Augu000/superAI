@@ -12,7 +12,7 @@ export const handler: Handler = async (event, context) => {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-      },
+      } as Record<string, string>,
       body: "",
     };
   }
@@ -22,7 +22,7 @@ export const handler: Handler = async (event, context) => {
       statusCode: 405,
       headers: {
         "Access-Control-Allow-Origin": "*",
-      },
+      } as Record<string, string>,
       body: JSON.stringify({ error: "Method not allowed" }),
     };
   }
@@ -34,7 +34,7 @@ export const handler: Handler = async (event, context) => {
         statusCode: 500,
         headers: {
           "Access-Control-Allow-Origin": "*",
-        },
+        } as Record<string, string>,
         body: JSON.stringify({ error: "API_KEY environment variable is not set" }),
       };
     }
@@ -45,7 +45,7 @@ export const handler: Handler = async (event, context) => {
         statusCode: 400,
         headers: {
           "Access-Control-Allow-Origin": "*",
-        },
+        } as Record<string, string>,
         body: JSON.stringify({ error: "Prompts array is required" }),
       };
     }
@@ -88,7 +88,7 @@ export const handler: Handler = async (event, context) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Content-Type": "application/json",
-        },
+        } as Record<string, string>,
         body: JSON.stringify({
           title: data.title || "A Nano Tale",
           visualStyle: data.visualStyle || "cinematic gold and light",
@@ -100,7 +100,7 @@ export const handler: Handler = async (event, context) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Content-Type": "application/json",
-        },
+        } as Record<string, string>,
         body: JSON.stringify({
           title: "A Nano Tale",
           visualStyle: "cinematic gold and light",
@@ -113,7 +113,7 @@ export const handler: Handler = async (event, context) => {
       statusCode: 500,
       headers: {
         "Access-Control-Allow-Origin": "*",
-      },
+      } as Record<string, string>,
       body: JSON.stringify({ error: error.message || "Internal server error" }),
     };
   }
