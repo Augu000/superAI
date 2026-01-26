@@ -52,7 +52,6 @@ const App: React.FC = () => {
   const [steps, setSteps] = useState<ImageStep[]>(createInitialSteps());
   const [rules, setRules] = useState<GlobalRule[]>([]);
   const [characterRef, setCharacterRef] = useState<string | null>(null);
-  const [hasKey, setHasKey] = useState(false);
 
   // keep demographicExclusion forced OFF (not exposed in UI)
   const [config, setConfig] = useState<GlobalConfig>({
@@ -76,21 +75,7 @@ const App: React.FC = () => {
 
   const [assets, setAssets] = useState<RenderedAsset[]>([]);
 
-  useEffect(() => {
-    const checkKey = async () => {
-      // Check if API key is available from environment
-      const hasKey = !!import.meta.env.VITE_API_KEY;
-      setHasKey(hasKey);
-    };
-    checkKey();
-  }, []);
-
   const getGemini = () => new GeminiService();
-
-  const handleSelectKey = async () => {
-    // API key is loaded from .env file
-    setHasKey(true);
-  };
 
   const handleCharacterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -214,8 +199,6 @@ const App: React.FC = () => {
   };
 
   const executeCurrentStep = async (index: number) => {
-    if (!hasKey) await handleSelectKey();
-
     const step = steps[index];
     setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "generating" } : s)));
 
@@ -493,10 +476,7 @@ const App: React.FC = () => {
           </div>
 
           {/* NEW: Book text + prompts generator */}
-          <BookGenerator
-            hasKey={hasKey}
-            onSelectKey={handleSelectKey}
-          />
+          <BookGenerator />
         </div>
 
         {/* Story Timeline */}

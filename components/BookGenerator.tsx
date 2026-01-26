@@ -8,20 +8,13 @@ const textArea =
   "w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-[11px] text-gray-200 focus:border-blue-500 outline-none resize-none font-mono min-h-[140px]";
 
 export default function BookGenerator({
-  hasKey,
-  onSelectKey,
   disabled,
 }: {
-  hasKey: boolean;
-  onSelectKey: () => Promise<void>;
   disabled?: boolean;
 }) {
   const [service] = useState(() => {
-    try {
-      return new BookTextService();
-    } catch {
-      return null;
-    }
+    // Service no longer needs API key - handled server-side
+    return new BookTextService();
   });
 
   const [input, setInput] = useState<BookInput>({
@@ -39,10 +32,6 @@ export default function BookGenerator({
   const [error, setError] = useState<string>("");
 
   const isDisabled = !!disabled || !!busy || !service;
-
-  const ensureKey = async () => {
-    if (!hasKey) await onSelectKey();
-  };
 
   const setInterests = (v: string) => {
     const arr = v
@@ -65,7 +54,6 @@ export default function BookGenerator({
     try {
       setBusy(label);
       setError("");
-      await ensureKey();
       await fn();
     } catch (err) {
       setError((err instanceof Error ? err.message : String(err)) || "Unknown error");
@@ -85,23 +73,6 @@ export default function BookGenerator({
         )}
       </div>
 
-      {!service && (
-        <div className="p-4 mb-4 bg-red-900/30 border border-red-700 rounded-lg">
-          <p className="text-[10px] text-red-200 font-semibold mb-2">⚠️ API Key Not Found</p>
-          <p className="text-[9px] text-red-100 mb-3">
-            The VITE_API_KEY environment variable is not set. On Netlify, you need to add it to your site's environment variables.
-          </p>
-          <div className="text-[9px] text-red-100 space-y-1">
-            <p><strong>Steps:</strong></p>
-            <ol className="list-decimal list-inside">
-              <li>Go to Netlify Site Settings → Build & Deploy → Environment</li>
-              <li>Add variable: <code className="bg-black/50 px-2 py-1">VITE_API_KEY</code></li>
-              <li>Set value to your Google AI API key</li>
-              <li>Redeploy your site</li>
-            </ol>
-          </div>
-        </div>
-      )}
 
       {error && (
         <div className="p-3 mb-4 bg-red-900/30 border border-red-700 rounded-lg">

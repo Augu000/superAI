@@ -1,23 +1,23 @@
 // src/services/geminiService.ts
-import { GoogleGenAI, Type } from "@google/genai";
 import type { AspectRatio, ImageSize } from "../types";
-
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
-const TEXT_MODEL = "gemini-3-flash-preview";
 
 type StepType = "cover" | "first" | "middle" | "last";
 type TextSide = "left" | "right" | "none";
 type CoverPart = "background" | "title" | "cast";
 
-export class GeminiService {
-  private ai: GoogleGenAI;
+// Get the base URL for Netlify Functions
+const getApiBaseUrl = () => {
+  // In production, functions are at /api/...
+  // In development with Netlify CLI, they're at http://localhost:8888/.netlify/functions/...
+  if (import.meta.env.DEV) {
+    return "http://localhost:8888/.netlify/functions";
+  }
+  return "/.netlify/functions";
+};
 
+export class GeminiService {
   constructor() {
-    const apiKey = import.meta.env.VITE_API_KEY;
-    if (!apiKey) {
-      throw new Error('VITE_API_KEY environment variable is not set');
-    }
-    this.ai = new GoogleGenAI({ apiKey });
+    // No API key needed - handled server-side
   }
 
   /**
@@ -25,60 +25,42 @@ export class GeminiService {
    * Returns plain text.
    */
   async generateText(prompt: string): Promise<string> {
-    const res = await this.ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ prompt }),
     });
 
-    // SDK sometimes exposes `.text`, sometimes `.response.text()`.
-    const text =
-      (res as any)?.text ??
-      (res as any)?.response?.text?.() ??
-      "";
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
 
-    return String(text || "");
+    const data = await response.json();
+    return data.text || "";
   }
 
   async analyzeStory(prompts: string[]): Promise<{ title: string; visualStyle: string }> {
-    const combined = prompts.filter((p) => p.trim().length > 0).join("\n");
-
-    const response = await this.ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text:
-                `Analyze these narrative scenes and determine a catchy cinematic title and a specific visual style for the typography that matches the theme ` +
-                `(e.g., "weathered pirate wood", "neon high-tech pulse", "medieval forged iron", "elegant victorian gold").\n\n` +
-                `Narrative Context:\n${combined}`,
-            },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "Maximum 5 words." },
-            visualStyle: { type: Type.STRING, description: "Description of the font's material, texture, and energy." },
-          },
-          required: ["title", "visualStyle"],
-        },
+    const response = await fetch(`${getApiBaseUrl()}/analyze-story`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({ prompts }),
     });
 
-    try {
-      const data = JSON.parse(response.text || "{}");
-      return {
-        title: data.title || "A Nano Tale",
-        visualStyle: data.visualStyle || "cinematic gold and light",
-      };
-    } catch {
-      return { title: "A Nano Tale", visualStyle: "cinematic gold and light" };
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error(error.error || `HTTP ${response.status}`);
     }
+
+    const data = await response.json();
+    return {
+      title: data.title || "A Nano Tale",
+      visualStyle: data.visualStyle || "cinematic gold and light",
+    };
   }
 
   async generateStepImage(
@@ -170,42 +152,47 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
       finalPromptText = `${ruleContext} ${compositionContext} SCENE: ${step.prompt}. Pure full-bleed cinematic artwork with no borders.`;
     }
 
-    const parts: any[] = [];
-
     const isTypographyLayer =
       step.type === "first" ||
       step.type === "last" ||
       step.coverPart === "title" ||
       step.coverPart === "cast";
 
+    // Add image context to prompt if we have reference images
+    let enhancedPrompt = finalPromptText;
     if (characterRefBase64 && !isTypographyLayer) {
-      const charData = characterRefBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
-      parts.push({ inlineData: { data: charData, mimeType: "image/png" } });
-      parts.push({ text: "PROTAGONIST REFERENCE: This is the hero character appearance." });
+      enhancedPrompt = `PROTAGONIST REFERENCE: This is the hero character appearance.\n${enhancedPrompt}`;
     }
-
     if (previousImageBase64 && !isTypographyLayer && step.type !== "cover") {
-      const prevData = previousImageBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
-      parts.push({ inlineData: { data: prevData, mimeType: "image/png" } });
-      parts.push({ text: "VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame." });
+      enhancedPrompt = `VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame.\n${enhancedPrompt}`;
     }
-
-    parts.push({ text: finalPromptText });
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: { parts },
-        config: { imageConfig: { aspectRatio: config.aspectRatio, imageSize: config.imageSize } },
+      const response = await fetch(`${getApiBaseUrl()}/generate-image`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: enhancedPrompt,
+          aspectRatio: config.aspectRatio,
+          imageSize: config.imageSize,
+          previousImageBase64: previousImageBase64 && !isTypographyLayer && step.type !== "cover" ? previousImageBase64 : undefined,
+          characterRefBase64: characterRefBase64 && !isTypographyLayer ? characterRefBase64 : undefined,
+        }),
       });
 
-      if (!response.candidates?.[0]?.content?.parts) throw new Error("Generation failed.");
-
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(error.error || `HTTP ${response.status}`);
       }
 
-      throw new Error("No image data found.");
+      const data = await response.json();
+      if (!data.image) {
+        throw new Error("No image data found.");
+      }
+
+      return data.image;
     } catch (error: any) {
       console.error("Gemini Error:", error);
       throw error;

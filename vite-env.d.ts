@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_API_KEY: string;
+  // API key is now handled server-side via Netlify Functions
+  // No client-side environment variables needed
 }
 
 interface ImportMeta {
