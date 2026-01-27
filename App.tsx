@@ -62,7 +62,7 @@ const App: React.FC = () => {
     aspectRatio: "16:9",
     imageSize: "1K",
     bleedPercent: 15,
-    demographicExclusion: false,
+    demographicExclusion: true,
   });
 
   const [isProcessActive, setIsProcessActive] = useState(false);
