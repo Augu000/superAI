@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, SavedProject } from "./types";
 import { GeminiService } from "./services/geminiService";
@@ -18,6 +18,7 @@ interface RenderedAsset {
   stepType?: string;
   coverPart?: "background" | "title" | "cast";
   originalPrompt?: string;
+  isPending?: boolean;
 }
 
 const App: React.FC = () => {
@@ -66,6 +67,8 @@ const App: React.FC = () => {
   });
 
   const [isProcessActive, setIsProcessActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
   const [isSuggestingTitle, setIsSuggestingTitle] = useState(false);
@@ -102,7 +105,21 @@ const App: React.FC = () => {
   const deleteStep = (id: string) => setSteps((prev) => prev.filter((s) => s.id !== id));
 
   const addAsset = (url: string, label: string, stepId?: string, stepType?: string, coverPart?: "background" | "title" | "cast", originalPrompt?: string) => {
-    setAssets((prev) => [{ id: uuidv4(), url, label, timestamp: Date.now(), stepId, stepType, coverPart, originalPrompt }, ...prev]);
+    setAssets((prev) => [{ id: uuidv4(), url, label, timestamp: Date.now(), stepId, stepType, coverPart, originalPrompt, isPending: false }, ...prev]);
+  };
+
+  const addPendingAsset = (label: string, stepId?: string, stepType?: string, coverPart?: "background" | "title" | "cast") => {
+    const pendingId = uuidv4();
+    setAssets((prev) => [{ id: pendingId, url: "", label, timestamp: Date.now(), stepId, stepType, coverPart, isPending: true }, ...prev]);
+    return pendingId;
+  };
+
+  const replacePendingAsset = (pendingId: string, url: string, originalPrompt?: string) => {
+    setAssets((prev) => prev.map((a) => 
+      a.id === pendingId 
+        ? { ...a, url, isPending: false, originalPrompt, timestamp: Date.now() }
+        : a
+    ));
   };
 
   const addSpread = () => {
@@ -402,6 +419,7 @@ const App: React.FC = () => {
       if (step.type === "cover") {
         // Only generate background initially, title and cast will be generated after approval
         setGenerationPhase("background");
+        const pendingId = addPendingAsset("Cover Background (Seamless)", step.id, step.type, "background");
         const bgUrl = await gemini.generateStepImage(
           { ...step, coverPart: "background" } as any,
           ruleTexts,
@@ -410,11 +428,13 @@ const App: React.FC = () => {
           characterRef || undefined
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
-        addAsset(bgUrl, "Cover Background (Seamless)", step.id, step.type, "background", step.prompt);
+        replacePendingAsset(pendingId, bgUrl, step.prompt);
 
         setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "completed" } : s)));
       } else {
         setGenerationPhase("scene");
+        const label = step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${index - 1} Artwork`;
+        const pendingId = addPendingAsset(label, step.id, step.type);
         const imageUrl = await gemini.generateStepImage(
           step,
           ruleTexts,
@@ -425,14 +445,7 @@ const App: React.FC = () => {
         setSteps((prev) =>
           prev.map((s, idx) => (idx === index ? { ...s, status: "completed", generatedImageUrl: imageUrl } : s))
         );
-        addAsset(
-          imageUrl,
-          step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${index - 1} Artwork`,
-          step.id,
-          step.type,
-          undefined,
-          step.prompt
-        );
+        replacePendingAsset(pendingId, imageUrl, step.prompt);
       }
 
       setGenerationPhase("idle");
@@ -454,13 +467,30 @@ const App: React.FC = () => {
     const queue = activeQueueSteps;
     if (queue.length === 0) return;
     setIsProcessActive(true);
+    setIsPaused(false);
+    isPausedRef.current = false;
     setCurrentQueueIndex(0);
     setAwaitingApproval(false);
     
     // Generate all steps sequentially without approval
     for (let i = 0; i < queue.length; i++) {
+      // Check if paused
+      while (isPausedRef.current && isProcessActive) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Check if process was stopped
+      if (!isProcessActive) break;
+      
       setCurrentQueueIndex(i);
       await executeCurrentStep(queue[i]);
+      
+      // Check if paused after step
+      while (isPausedRef.current && isProcessActive) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      if (!isProcessActive) break;
       
       // Auto-approve and continue
       const step = steps[queue[i]];
@@ -485,22 +515,24 @@ const App: React.FC = () => {
           
           // Generate title and cast image layers
           setGenerationPhase("title");
+          const titlePendingId = addPendingAsset("Cover Title Layer", step.id, step.type, "title");
           const titleUrl = await gemini.generateStepImage(
             { ...step, bookTitle: analysis.title, coverPart: "title" } as any,
             ruleTexts,
             config
           );
           updateStep(step.id, { generatedTitleUrl: titleUrl });
-          addAsset(titleUrl, "Cover Title Layer", step.id, step.type, "title", step.bookTitle || "");
+          replacePendingAsset(titlePendingId, titleUrl, step.bookTitle || "");
 
           setGenerationPhase("cast");
+          const castPendingId = addPendingAsset("Cover Cast Layer", step.id, step.type, "cast");
           const castUrl = await gemini.generateStepImage(
             { ...step, cast: castName, coverPart: "cast" } as any,
             ruleTexts,
             config
           );
           updateStep(step.id, { generatedCastUrl: castUrl });
-          addAsset(castUrl, "Cover Cast Layer", step.id, step.type, "cast", step.cast || "");
+          replacePendingAsset(castPendingId, castUrl, step.cast || "");
         } catch (error) {
           console.error("Error generating title/cast:", error);
         }
@@ -514,6 +546,26 @@ const App: React.FC = () => {
     }
     
     setIsProcessActive(false);
+    setIsPaused(false);
+    setCurrentQueueIndex(-1);
+    setAwaitingApproval(false);
+    setGenerationPhase("idle");
+  };
+
+  const handlePause = () => {
+    setIsPaused(true);
+    isPausedRef.current = true;
+  };
+
+  const handleResume = () => {
+    setIsPaused(false);
+    isPausedRef.current = false;
+  };
+
+  const handleStop = () => {
+    setIsProcessActive(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
     setCurrentQueueIndex(-1);
     setAwaitingApproval(false);
     setGenerationPhase("idle");
@@ -542,24 +594,26 @@ const App: React.FC = () => {
         const firstPage = steps.find((s) => s.type === "first");
         if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
         
-        // Generate title and cast image layers
-        setGenerationPhase("title");
-        const titleUrl = await gemini.generateStepImage(
-          { ...currentStep, bookTitle: analysis.title, coverPart: "title" } as any,
-          ruleTexts,
-          config
-        );
-        updateStep(currentStep.id, { generatedTitleUrl: titleUrl });
-        addAsset(titleUrl, "Cover Title Layer", currentStep.id, currentStep.type, "title", currentStep.bookTitle || "");
+          // Generate title and cast image layers
+          setGenerationPhase("title");
+          const titlePendingId = addPendingAsset("Cover Title Layer", currentStep.id, currentStep.type, "title");
+          const titleUrl = await gemini.generateStepImage(
+            { ...currentStep, bookTitle: analysis.title, coverPart: "title" } as any,
+            ruleTexts,
+            config
+          );
+          updateStep(currentStep.id, { generatedTitleUrl: titleUrl });
+          replacePendingAsset(titlePendingId, titleUrl, currentStep.bookTitle || "");
 
-        setGenerationPhase("cast");
-        const castUrl = await gemini.generateStepImage(
-          { ...currentStep, cast: castName, coverPart: "cast" } as any,
-          ruleTexts,
-          config
-        );
-        updateStep(currentStep.id, { generatedCastUrl: castUrl });
-        addAsset(castUrl, "Cover Cast Layer", currentStep.id, currentStep.type, "cast", currentStep.cast || "");
+          setGenerationPhase("cast");
+          const castPendingId = addPendingAsset("Cover Cast Layer", currentStep.id, currentStep.type, "cast");
+          const castUrl = await gemini.generateStepImage(
+            { ...currentStep, cast: castName, coverPart: "cast" } as any,
+            ruleTexts,
+            config
+          );
+          updateStep(currentStep.id, { generatedCastUrl: castUrl });
+          replacePendingAsset(castPendingId, castUrl, currentStep.cast || "");
       } catch (error) {
         console.error("Error generating title/cast:", error);
       }
@@ -680,13 +734,21 @@ const App: React.FC = () => {
         updateStep(step.id, { generatedImageUrl: newUrl });
       }
 
-      // Update asset in the list
-      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, url: newUrl, timestamp: Date.now(), originalPrompt: enhancedPrompt } : a));
+      // Update asset in the list - temporarily mark as pending to show spinner
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: true } : a));
+      
+      // Small delay to show spinner, then update with new image
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, url: newUrl, timestamp: Date.now(), originalPrompt: enhancedPrompt, isPending: false } : a));
       setRegenerateEditPrompt("");
       setRegeneratingAssetId(null);
     } catch (error) {
       console.error("Error regenerating asset:", error);
+      // Reset pending state on error
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
       setRegeneratingAssetId(null);
+      setRegenerateEditPrompt("");
     }
   };
 
@@ -896,8 +958,8 @@ const App: React.FC = () => {
                 onUpdate={updateStep}
                 onDelete={step.type === "middle" ? deleteStep : undefined}
                 onGenerateTitle={step.type === "cover" ? handleGenerateTitle : undefined}
-                onGenerate={step.prompt.trim() ? () => handleGenerateSingleStep(step.id) : undefined}
-                disabled={isProcessActive}
+                onGenerate={step.prompt.trim() && !isProcessActive ? () => handleGenerateSingleStep(step.id) : undefined}
+                disabled={isProcessActive && !isPaused}
                 isSuggestingTitle={step.type === "cover" && isSuggestingTitle}
               />
             ))}
@@ -919,18 +981,51 @@ const App: React.FC = () => {
         {/* Master Monitor & Assets Stack */}
         <div className="lg:col-span-5 flex flex-col gap-8 overflow-y-auto custom-scrollbar">
           {/* Initiate Render Button */}
-          <div className="flex justify-end">
-            <button
-              onClick={startNarrativeFlow}
-              disabled={isProcessActive || steps.every((s) => !s.prompt.trim())}
-              className={`w-1/3 px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all ${
-                isProcessActive || steps.every((s) => !s.prompt.trim())
-                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                  : "bg-[#3355FF] hover:bg-[#2a44cc] text-white shadow-lg shadow-[#3355FF]/20 active:scale-95"
-              }`}
-            >
-              INITIATE RENDER
-            </button>
+          <div className="flex justify-end gap-2">
+            {isProcessActive ? (
+              <>
+                {isPaused ? (
+                  <button
+                    onClick={handleResume}
+                    className="px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 active:scale-95 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Resume
+                  </button>
+                ) : (
+                  <button
+                    onClick={handlePause}
+                    className="px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-600/20 active:scale-95 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Pause
+                  </button>
+                )}
+                <button
+                  onClick={handleStop}
+                  className="px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 active:scale-95"
+                >
+                  Stop
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={startNarrativeFlow}
+                disabled={steps.every((s) => !s.prompt.trim())}
+                className={`w-1/3 px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all ${
+                  steps.every((s) => !s.prompt.trim())
+                    ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-[#3355FF] hover:bg-[#2a44cc] text-white shadow-lg shadow-[#3355FF]/20 active:scale-95"
+                }`}
+              >
+                INITIATE RENDER
+              </button>
+            )}
           </div>
           
           {/* Monitor */}
@@ -1071,25 +1166,33 @@ const App: React.FC = () => {
                     key={asset.id}
                     className="group flex items-center gap-4 p-2.5 bg-slate-900/40 rounded border border-white/5 hover:border-white/10 transition-all animate-in slide-in-from-left-4 duration-300"
                   >
-                    <div className="w-16 aspect-video rounded-sm overflow-hidden bg-black shrink-0">
-                      <img src={asset.url} className="w-full h-full object-cover" alt={asset.label} />
+                    <div className="w-16 aspect-video rounded-sm overflow-hidden bg-black shrink-0 flex items-center justify-center">
+                      {asset.isPending ? (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      ) : (
+                        <img src={asset.url} className="w-full h-full object-cover" alt={asset.label} />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[9px] font-black text-slate-300 uppercase tracking-tight truncate">
                         {asset.label}
                       </p>
                       <p className="text-[7px] text-slate-500 uppercase tracking-widest mt-0.5">
-                        {new Date(asset.timestamp).toLocaleTimeString()}
+                        {asset.isPending ? "Generating..." : new Date(asset.timestamp).toLocaleTimeString()}
                       </p>
                     </div>
-                    <button
-                      onClick={() => downloadImage(asset.url, asset.label)}
-                      className="w-7 h-7 rounded bg-slate-800 hover:bg-blue-600 text-slate-400 hover:text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                    </button>
+                    {!asset.isPending && (
+                      <button
+                        onClick={() => downloadImage(asset.url, asset.label)}
+                        className="w-7 h-7 rounded bg-slate-800 hover:bg-blue-600 text-slate-400 hover:text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 ))
               )}
@@ -1201,65 +1304,85 @@ const App: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {assets.map((asset) => (
+                {assets.map((asset) => {
+                  const isRegenerating = regeneratingAssetId === asset.id;
+                  const showSpinner = asset.isPending || isRegenerating;
+                  
+                  return (
                   <div
                     key={asset.id}
                     className="group relative bg-slate-900/50 rounded-lg border border-white/5 hover:border-white/20 transition-all overflow-hidden"
                   >
-                    <div className="aspect-video w-full overflow-hidden bg-black">
-                      <img src={asset.url} alt={asset.label} className="w-full h-full object-cover" />
+                    <div className="aspect-video w-full overflow-hidden bg-black relative">
+                      {showSpinner ? (
+                        <div className="w-full h-full flex items-center justify-center bg-slate-950">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                            <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">
+                              {isRegenerating ? "Regenerating..." : "Generating..."}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <img src={asset.url} alt={asset.label} className="w-full h-full object-cover" />
+                      )}
                     </div>
                     <div className="p-3">
                       <p className="text-[9px] font-black text-white uppercase tracking-tight mb-1">{asset.label}</p>
                       <p className="text-[7px] text-slate-500 uppercase tracking-widest mb-3">
-                        {new Date(asset.timestamp).toLocaleString()}
+                        {showSpinner ? (isRegenerating ? "Regenerating..." : "Generating...") : new Date(asset.timestamp).toLocaleString()}
                       </p>
                       
-                      {regeneratingAssetId === asset.id ? (
-                        <div className="space-y-2">
-                          <textarea
-                            value={regenerateEditPrompt}
-                            onChange={(e) => setRegenerateEditPrompt(e.target.value)}
-                            placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
-                            className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
-                            autoFocus
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleRegenerateAsset(asset)}
-                              disabled={!regenerateEditPrompt.trim()}
-                              className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
-                            >
-                              Regenerate
-                            </button>
+                      {!showSpinner && (
+                        <>
+                          {regeneratingAssetId === asset.id ? (
+                            <div className="space-y-2">
+                              <textarea
+                                value={regenerateEditPrompt}
+                                onChange={(e) => setRegenerateEditPrompt(e.target.value)}
+                                placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
+                                className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
+                                autoFocus
+                              />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleRegenerateAsset(asset)}
+                                  disabled={!regenerateEditPrompt.trim()}
+                                  className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                                >
+                                  Regenerate
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRegeneratingAssetId(null);
+                                    setRegenerateEditPrompt("");
+                                  }}
+                                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
                             <button
                               onClick={() => {
-                                setRegeneratingAssetId(null);
+                                setRegeneratingAssetId(asset.id);
                                 setRegenerateEditPrompt("");
                               }}
-                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                              className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
                             >
-                              Cancel
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              Regenerate
                             </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setRegeneratingAssetId(asset.id);
-                            setRegenerateEditPrompt("");
-                          }}
-                          className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          Regenerate
-                        </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
