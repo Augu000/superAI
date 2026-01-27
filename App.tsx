@@ -14,6 +14,10 @@ interface RenderedAsset {
   url: string;
   label: string;
   timestamp: number;
+  stepId?: string;
+  stepType?: string;
+  coverPart?: "background" | "title" | "cast";
+  originalPrompt?: string;
 }
 
 const App: React.FC = () => {
@@ -78,6 +82,9 @@ const App: React.FC = () => {
   const [showSavedProjects, setShowSavedProjects] = useState(false);
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [bookGeneratorKey, setBookGeneratorKey] = useState(0);
+  const [showAssetGallery, setShowAssetGallery] = useState(false);
+  const [regeneratingAssetId, setRegeneratingAssetId] = useState<string | null>(null);
+  const [regenerateEditPrompt, setRegenerateEditPrompt] = useState("");
 
   const getGemini = () => new GeminiService();
 
@@ -94,8 +101,8 @@ const App: React.FC = () => {
 
   const deleteStep = (id: string) => setSteps((prev) => prev.filter((s) => s.id !== id));
 
-  const addAsset = (url: string, label: string) => {
-    setAssets((prev) => [{ id: uuidv4(), url, label, timestamp: Date.now() }, ...prev]);
+  const addAsset = (url: string, label: string, stepId?: string, stepType?: string, coverPart?: "background" | "title" | "cast", originalPrompt?: string) => {
+    setAssets((prev) => [{ id: uuidv4(), url, label, timestamp: Date.now(), stepId, stepType, coverPart, originalPrompt }, ...prev]);
   };
 
   const addSpread = () => {
@@ -393,26 +400,7 @@ const App: React.FC = () => {
       const previousImage = index > 0 ? steps[index - 1].generatedImageUrl : undefined;
 
       if (step.type === "cover") {
-        if (step.showText) {
-          setGenerationPhase("title");
-          const titleUrl = await gemini.generateStepImage(
-            { ...step, coverPart: "title" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(step.id, { generatedTitleUrl: titleUrl });
-          addAsset(titleUrl, "Cover Title Layer");
-
-          setGenerationPhase("cast");
-          const castUrl = await gemini.generateStepImage(
-            { ...step, coverPart: "cast" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(step.id, { generatedCastUrl: castUrl });
-          addAsset(castUrl, "Cover Cast Layer");
-        }
-
+        // Only generate background initially, title and cast will be generated after approval
         setGenerationPhase("background");
         const bgUrl = await gemini.generateStepImage(
           { ...step, coverPart: "background" } as any,
@@ -422,7 +410,7 @@ const App: React.FC = () => {
           characterRef || undefined
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
-        addAsset(bgUrl, "Cover Background (Seamless)");
+        addAsset(bgUrl, "Cover Background (Seamless)", step.id, step.type, "background", step.prompt);
 
         setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "completed" } : s)));
       } else {
@@ -439,7 +427,11 @@ const App: React.FC = () => {
         );
         addAsset(
           imageUrl,
-          step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${index - 1} Artwork`
+          step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${index - 1} Artwork`,
+          step.id,
+          step.type,
+          undefined,
+          step.prompt
         );
       }
 
@@ -464,11 +456,115 @@ const App: React.FC = () => {
     setIsProcessActive(true);
     setCurrentQueueIndex(0);
     setAwaitingApproval(false);
-    await executeCurrentStep(queue[0]);
+    
+    // Generate all steps sequentially without approval
+    for (let i = 0; i < queue.length; i++) {
+      setCurrentQueueIndex(i);
+      await executeCurrentStep(queue[i]);
+      
+      // Auto-approve and continue
+      const step = steps[queue[i]];
+      if (step.type === "cover" && step.showText && !step.generatedTitleUrl) {
+        // Generate title and cast for cover
+        try {
+          const gemini = getGemini();
+          const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
+          
+          // Generate 1 title
+          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
+          const analysis = await gemini.analyzeStory(allPrompts);
+          updateStep(step.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+          
+          // Generate 1 cast name from story context
+          const castName = await gemini.generateCastName(allPrompts);
+          updateStep(step.id, { cast: castName });
+          
+          // Sync title to first page
+          const firstPage = steps.find((s) => s.type === "first");
+          if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+          
+          // Generate title and cast image layers
+          setGenerationPhase("title");
+          const titleUrl = await gemini.generateStepImage(
+            { ...step, bookTitle: analysis.title, coverPart: "title" } as any,
+            ruleTexts,
+            config
+          );
+          updateStep(step.id, { generatedTitleUrl: titleUrl });
+          addAsset(titleUrl, "Cover Title Layer", step.id, step.type, "title", step.bookTitle || "");
+
+          setGenerationPhase("cast");
+          const castUrl = await gemini.generateStepImage(
+            { ...step, cast: castName, coverPart: "cast" } as any,
+            ruleTexts,
+            config
+          );
+          updateStep(step.id, { generatedCastUrl: castUrl });
+          addAsset(castUrl, "Cover Cast Layer", step.id, step.type, "cast", step.cast || "");
+        } catch (error) {
+          console.error("Error generating title/cast:", error);
+        }
+      }
+      
+      // Move to next step
+      if (i < queue.length - 1) {
+        setCurrentQueueIndex(i + 1);
+        setAwaitingApproval(false);
+      }
+    }
+    
+    setIsProcessActive(false);
+    setCurrentQueueIndex(-1);
+    setAwaitingApproval(false);
+    setGenerationPhase("idle");
   };
 
   const handleApproval = async () => {
     const queue = activeQueueSteps;
+    const currentStep = steps[queue[currentQueueIndex]];
+    
+    // If approved step is a cover with showText enabled, generate title and cast
+    if (currentStep?.type === "cover" && currentStep.showText && !currentStep.generatedTitleUrl) {
+      try {
+        const gemini = getGemini();
+        const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
+        
+        // Generate 1 title
+        const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
+        const analysis = await gemini.analyzeStory(allPrompts);
+        updateStep(currentStep.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+        
+        // Generate 1 cast name from story context
+        const castName = await gemini.generateCastName(allPrompts);
+        updateStep(currentStep.id, { cast: castName });
+        
+        // Sync title to first page
+        const firstPage = steps.find((s) => s.type === "first");
+        if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+        
+        // Generate title and cast image layers
+        setGenerationPhase("title");
+        const titleUrl = await gemini.generateStepImage(
+          { ...currentStep, bookTitle: analysis.title, coverPart: "title" } as any,
+          ruleTexts,
+          config
+        );
+        updateStep(currentStep.id, { generatedTitleUrl: titleUrl });
+        addAsset(titleUrl, "Cover Title Layer", currentStep.id, currentStep.type, "title", currentStep.bookTitle || "");
+
+        setGenerationPhase("cast");
+        const castUrl = await gemini.generateStepImage(
+          { ...currentStep, cast: castName, coverPart: "cast" } as any,
+          ruleTexts,
+          config
+        );
+        updateStep(currentStep.id, { generatedCastUrl: castUrl });
+        addAsset(castUrl, "Cover Cast Layer", currentStep.id, currentStep.type, "cast", currentStep.cast || "");
+      } catch (error) {
+        console.error("Error generating title/cast:", error);
+      }
+    }
+    
     const nextQueueIdx = currentQueueIndex + 1;
     if (nextQueueIdx < queue.length) {
       setCurrentQueueIndex(nextQueueIdx);
@@ -477,6 +573,7 @@ const App: React.FC = () => {
     } else {
       setIsProcessActive(false);
       setCurrentQueueIndex(-1);
+      setAwaitingApproval(false);
     }
   };
 
@@ -501,6 +598,13 @@ const App: React.FC = () => {
     }
   };
 
+  const handleGenerateSingleStep = async (stepId: string) => {
+    const stepIndex = steps.findIndex((s) => s.id === stepId);
+    if (stepIndex === -1) return;
+    
+    await executeCurrentStep(stepIndex);
+  };
+
   const downloadImage = (url: string, label: string) => {
     const link = document.createElement("a");
     link.href = url;
@@ -512,6 +616,78 @@ const App: React.FC = () => {
     assets.forEach((asset, idx) => {
       setTimeout(() => downloadImage(asset.url, asset.label), idx * 300);
     });
+  };
+
+  const handleRegenerateAsset = async (asset: RenderedAsset) => {
+    if (!asset.stepId || !regenerateEditPrompt.trim()) return;
+    
+    setRegeneratingAssetId(asset.id);
+    try {
+      const stepIndex = steps.findIndex((s) => s.id === asset.stepId);
+      if (stepIndex === -1) {
+        setRegeneratingAssetId(null);
+        return;
+      }
+      const step = steps[stepIndex];
+
+      const gemini = getGemini();
+      const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
+      
+      // Enhance the original prompt with user edits
+      const enhancedPrompt = asset.originalPrompt 
+        ? `${asset.originalPrompt}. User edits: ${regenerateEditPrompt.trim()}`
+        : regenerateEditPrompt.trim();
+
+      let newUrl: string;
+      
+      if (asset.coverPart) {
+        // Regenerate cover part
+        const stepWithEdit = { ...step };
+        if (asset.coverPart === "title") {
+          stepWithEdit.bookTitle = enhancedPrompt;
+        } else if (asset.coverPart === "cast") {
+          stepWithEdit.cast = enhancedPrompt;
+        } else {
+          stepWithEdit.prompt = enhancedPrompt;
+        }
+        
+        newUrl = await gemini.generateStepImage(
+          { ...stepWithEdit, coverPart: asset.coverPart } as any,
+          ruleTexts,
+          config
+        );
+        
+        // Update the step with new URL
+        if (asset.coverPart === "background") {
+          updateStep(step.id, { generatedImageUrl: newUrl });
+        } else if (asset.coverPart === "title") {
+          updateStep(step.id, { generatedTitleUrl: newUrl });
+        } else if (asset.coverPart === "cast") {
+          updateStep(step.id, { generatedCastUrl: newUrl });
+        }
+      } else {
+        // Regenerate regular step
+        const previousImage = stepIndex > 0 ? steps[stepIndex - 1]?.generatedImageUrl : undefined;
+        
+        newUrl = await gemini.generateStepImage(
+          { ...step, prompt: enhancedPrompt },
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        
+        updateStep(step.id, { generatedImageUrl: newUrl });
+      }
+
+      // Update asset in the list
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, url: newUrl, timestamp: Date.now(), originalPrompt: enhancedPrompt } : a));
+      setRegenerateEditPrompt("");
+      setRegeneratingAssetId(null);
+    } catch (error) {
+      console.error("Error regenerating asset:", error);
+      setRegeneratingAssetId(null);
+    }
   };
 
   return (
@@ -720,6 +896,7 @@ const App: React.FC = () => {
                 onUpdate={updateStep}
                 onDelete={step.type === "middle" ? deleteStep : undefined}
                 onGenerateTitle={step.type === "cover" ? handleGenerateTitle : undefined}
+                onGenerate={step.prompt.trim() ? () => handleGenerateSingleStep(step.id) : undefined}
                 disabled={isProcessActive}
                 isSuggestingTitle={step.type === "cover" && isSuggestingTitle}
               />
@@ -861,12 +1038,23 @@ const App: React.FC = () => {
                 </p>
               </div>
               {assets.length > 0 && (
-                <button
-                  onClick={downloadAll}
-                  className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[7px] font-black rounded uppercase tracking-widest shadow shadow-blue-500/10 transition-all"
-                >
-                  Download Stack
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAssetGallery(true)}
+                    className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-[7px] font-black rounded uppercase tracking-widest transition-all flex items-center gap-1.5"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Preview
+                  </button>
+                  <button
+                    onClick={downloadAll}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[7px] font-black rounded uppercase tracking-widest shadow shadow-blue-500/10 transition-all"
+                  >
+                    Download Stack
+                  </button>
+                </div>
               )}
             </div>
 
@@ -990,6 +1178,89 @@ const App: React.FC = () => {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Asset Gallery Modal */}
+      {showAssetGallery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowAssetGallery(false)}>
+          <div className="glass-panel rounded-2xl p-6 max-w-6xl w-full mx-4 border border-white/10 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-black text-white uppercase tracking-widest">Asset Gallery</h3>
+              <button
+                onClick={() => setShowAssetGallery(false)}
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {assets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="group relative bg-slate-900/50 rounded-lg border border-white/5 hover:border-white/20 transition-all overflow-hidden"
+                  >
+                    <div className="aspect-video w-full overflow-hidden bg-black">
+                      <img src={asset.url} alt={asset.label} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="p-3">
+                      <p className="text-[9px] font-black text-white uppercase tracking-tight mb-1">{asset.label}</p>
+                      <p className="text-[7px] text-slate-500 uppercase tracking-widest mb-3">
+                        {new Date(asset.timestamp).toLocaleString()}
+                      </p>
+                      
+                      {regeneratingAssetId === asset.id ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={regenerateEditPrompt}
+                            onChange={(e) => setRegenerateEditPrompt(e.target.value)}
+                            placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
+                            className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
+                            autoFocus
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleRegenerateAsset(asset)}
+                              disabled={!regenerateEditPrompt.trim()}
+                              className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                            >
+                              Regenerate
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRegeneratingAssetId(null);
+                                setRegenerateEditPrompt("");
+                              }}
+                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setRegeneratingAssetId(asset.id);
+                            setRegenerateEditPrompt("");
+                          }}
+                          className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Regenerate
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

@@ -63,6 +63,27 @@ export class GeminiService {
     };
   }
 
+  async generateCastName(prompts: string[]): Promise<string> {
+    const combined = prompts.filter((p: string) => p.trim().length > 0).join("\n");
+    const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: `Based on this story context, generate ONE character name (the hero/main character name) in 1-2 words maximum. Just return the name, nothing else.\n\nStory Context:\n${combined}`,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    return (data.text || "The Hero").trim().split(/\s+/).slice(0, 2).join(" ");
+  }
+
   async generateStepImage(
     step: {
       prompt: string;

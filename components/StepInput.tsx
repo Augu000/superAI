@@ -8,11 +8,12 @@ interface StepInputProps {
   onUpdate: (id: string, updates: Partial<ImageStep>) => void;
   onDelete?: (id: string) => void;
   onGenerateTitle?: (id: string) => void;
+  onGenerate?: () => void;
   disabled?: boolean;
   isSuggestingTitle?: boolean;
 }
 
-const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, disabled, isSuggestingTitle }) => {
+const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, onGenerate, disabled, isSuggestingTitle }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleDeleteClick = () => {
@@ -128,12 +129,36 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
           </div>
         )}
 
-        <textarea 
-          value={step.prompt} 
-          onChange={e => onUpdate(step.id, { prompt: e.target.value })}
-          placeholder="Enter visual description..."
-          className="w-full bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
-        />
+        <div className="flex items-start gap-2">
+          <textarea 
+            value={step.prompt} 
+            onChange={e => onUpdate(step.id, { prompt: e.target.value })}
+            placeholder="Enter visual description..."
+            className="flex-1 bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
+          />
+          {onGenerate && step.prompt.trim() && (
+            <button
+              onClick={onGenerate}
+              disabled={disabled || step.status === "generating"}
+              className={`px-3 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all flex-shrink-0 ${
+                step.status === "generating"
+                  ? "bg-blue-600 text-white cursor-wait"
+                  : disabled
+                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 active:scale-95"
+              }`}
+            >
+              {step.status === "generating" ? (
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 border border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Generating</span>
+                </div>
+              ) : (
+                "Generate"
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Delete Confirmation Popup */}
