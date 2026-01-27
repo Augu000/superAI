@@ -666,6 +666,15 @@ const App: React.FC = () => {
 
   const handleGenerateTitle = async (id: string) => {
     if (isSuggestingTitle) return;
+    
+    const step = steps.find((s) => s.id === id);
+    if (!step) return;
+    
+    // If title already exists, don't regenerate
+    if (step.bookTitle && step.bookTitle.trim().length > 0) {
+      return;
+    }
+    
     setIsSuggestingTitle(true);
     try {
       const gemini = getGemini();
@@ -752,13 +761,29 @@ const App: React.FC = () => {
   const handleRegenerateAsset = async (asset: RenderedAsset) => {
     if (!asset.stepId || !regenerateEditPrompt.trim()) return;
     
+    // Prevent multiple simultaneous regenerations - check if ANY asset is currently regenerating
+    const isAnyRegenerating = assets.some((a) => a.isPending);
+    if (isAnyRegenerating) {
+      console.log("Another asset is already regenerating, please wait");
+      return;
+    }
+    
+    // Only proceed if this is the asset we're working on
+    if (regeneratingAssetId !== asset.id) return;
+    
+    // Mark as regenerating to show spinner
     setRegeneratingAssetId(asset.id);
+    
     try {
       const stepIndex = steps.findIndex((s) => s.id === asset.stepId);
       if (stepIndex === -1) {
         setRegeneratingAssetId(null);
         return;
       }
+      
+      // Now mark as pending to show spinner
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: true } : a));
+      
       const step = steps[stepIndex];
 
       const gemini = getGemini();
@@ -811,12 +836,7 @@ const App: React.FC = () => {
         updateStep(step.id, { generatedImageUrl: newUrl });
       }
 
-      // Update asset in the list - temporarily mark as pending to show spinner
-      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: true } : a));
-      
-      // Small delay to show spinner, then update with new image
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
+      // Update asset with new image
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, url: newUrl, timestamp: Date.now(), originalPrompt: enhancedPrompt, isPending: false } : a));
       setRegenerateEditPrompt("");
       setRegeneratingAssetId(null);
@@ -1463,51 +1483,81 @@ const App: React.FC = () => {
                         {showSpinner ? (isRegenerating ? "Regenerating..." : "Generating...") : new Date(asset.timestamp).toLocaleString()}
                       </p>
                       
-                      {!showSpinner && (
-                        <>
-                          {regeneratingAssetId === asset.id ? (
-                            <div className="space-y-2">
-                              <textarea
-                                value={regenerateEditPrompt}
-                                onChange={(e) => setRegenerateEditPrompt(e.target.value)}
-                                placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
-                                className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
-                                autoFocus
-                              />
+                      {regeneratingAssetId === asset.id ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={regenerateEditPrompt}
+                            onChange={(e) => setRegenerateEditPrompt(e.target.value)}
+                            placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
+                            className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
+                            autoFocus
+                            disabled={showSpinner}
+                          />
                               <div className="flex items-center gap-2">
                                 <button
                                   onClick={() => handleRegenerateAsset(asset)}
-                                  disabled={!regenerateEditPrompt.trim()}
-                                  className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
+                                  disabled={!regenerateEditPrompt.trim() || showSpinner || assets.some((a) => a.isPending)}
+                                  className={`flex-1 px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${
+                                    !regenerateEditPrompt.trim() || showSpinner || assets.some((a) => a.isPending)
+                                      ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                      : "bg-blue-600 hover:bg-blue-500 text-white"
+                                  }`}
                                 >
-                                  Regenerate
+                                  {showSpinner ? (
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <div className="w-2.5 h-2.5 border border-white/30 border-t-white rounded-full animate-spin" />
+                                      <span>Regenerating...</span>
+                                    </div>
+                                  ) : (
+                                    "Regenerate"
+                                  )}
                                 </button>
-                                <button
-                                  onClick={() => {
-                                    setRegeneratingAssetId(null);
-                                    setRegenerateEditPrompt("");
-                                  }}
-                                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
                             <button
                               onClick={() => {
-                                setRegeneratingAssetId(asset.id);
+                                setRegeneratingAssetId(null);
                                 setRegenerateEditPrompt("");
+                                setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
                               }}
-                              className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
+                              disabled={showSpinner}
+                              className={`px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${
+                                showSpinner
+                                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                  : "bg-slate-700 hover:bg-slate-600 text-white"
+                              }`}
                             >
-                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                              </svg>
-                              Regenerate
+                              Cancel
                             </button>
-                          )}
-                        </>
+                          </div>
+                        </div>
+                      ) : !showSpinner && (
+                        <button
+                          onClick={() => {
+                            // Prevent clicking if any regeneration is in progress
+                            const isAnyRegenerating = assets.some((a) => a.isPending);
+                            if (isAnyRegenerating) return;
+                            
+                            // Just open the textarea for input - don't start regeneration yet
+                            // If another asset has the textarea open, close it first
+                            if (regeneratingAssetId !== null && regeneratingAssetId !== asset.id) {
+                              setRegeneratingAssetId(asset.id);
+                              setRegenerateEditPrompt("");
+                            } else {
+                              setRegeneratingAssetId(asset.id);
+                              setRegenerateEditPrompt("");
+                            }
+                          }}
+                          disabled={assets.some((a) => a.isPending)}
+                          className={`w-full px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${
+                            assets.some((a) => a.isPending)
+                              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                              : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                          }`}
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Regenerate
+                        </button>
                       )}
                     </div>
                   </div>
