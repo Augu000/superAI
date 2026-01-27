@@ -65,6 +65,7 @@ export default function BookGenerator({
   const [busy, setBusy] = useState<null | string>(null);
   const [selectedTitle, setSelectedTitle] = useState<string>(initialData.selectedTitle);
   const [error, setError] = useState<string>("");
+  const [interestsInputValue, setInterestsInputValue] = useState<string>(initialData.input.interests.join(", "));
 
   // Save to localStorage whenever input, outputs, or selectedTitle changes
   useEffect(() => {
@@ -94,13 +95,25 @@ export default function BookGenerator({
   const isDisabled = !!disabled || !!busy || !service;
 
   const setInterests = (v: string) => {
+    // Update the input value immediately to allow free typing
+    setInterestsInputValue(v);
+    
+    // Split by comma, but preserve spaces within each interest
     const arr = v
       .split(",")
-      .map((s) => s.trim())
+      .map((s) => s.trim()) // Only trim leading/trailing whitespace
       .filter(Boolean)
       .slice(0, 3);
     setInput((p) => ({ ...p, interests: arr }));
   };
+  
+  // Sync interestsInputValue when input.interests changes externally
+  useEffect(() => {
+    const currentValue = input.interests.join(", ");
+    if (interestsInputValue !== currentValue && !interestsInputValue.endsWith(" ")) {
+      setInterestsInputValue(currentValue);
+    }
+  }, [input.interests]);
 
   const titlesList = service
     ? (outputs.titlesLt ? service.parseTitlesLt(outputs.titlesLt) : [])
@@ -204,7 +217,7 @@ export default function BookGenerator({
           <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Interests</label>
           <input
             className={inputBox}
-            value={input.interests.join(", ")}
+            value={interestsInputValue}
             onChange={(e) => setInterests(e.target.value)}
             placeholder="Interests (comma separated, max 3)"
             disabled={isDisabled}

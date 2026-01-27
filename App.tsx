@@ -72,6 +72,7 @@ const App: React.FC = () => {
   const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
   const [isSuggestingTitle, setIsSuggestingTitle] = useState(false);
+  const [isGeneratingTitleCast, setIsGeneratingTitleCast] = useState(false);
 
   const [quickPasteText, setQuickPasteText] = useState("");
   const [showQuickPaste, setShowQuickPaste] = useState(false);
@@ -88,6 +89,7 @@ const App: React.FC = () => {
   const [showAssetGallery, setShowAssetGallery] = useState(false);
   const [regeneratingAssetId, setRegeneratingAssetId] = useState<string | null>(null);
   const [regenerateEditPrompt, setRegenerateEditPrompt] = useState("");
+  const [selectedAssetForPreview, setSelectedAssetForPreview] = useState<string | null>(null);
 
   const getGemini = () => new GeminiService();
 
@@ -494,36 +496,47 @@ const App: React.FC = () => {
       
       // Auto-approve and continue
       const step = steps[queue[i]];
-      if (step.type === "cover" && step.showText && !step.generatedTitleUrl) {
-        // Generate title and cast for cover
+      if (step.type === "cover" && step.showText && !step.generatedTitleUrl && !isGeneratingTitleCast) {
+        // Generate title and cast for cover (only once)
+        setIsGeneratingTitleCast(true);
         try {
           const gemini = getGemini();
           const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
           
-          // Generate 1 title
-          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-          const analysis = await gemini.analyzeStory(allPrompts);
-          updateStep(step.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+          // Use existing title from input if available, otherwise generate one
+          let finalTitle = step.bookTitle;
+          let visualStyle = step.storyStyle || "cinematic gold and light";
+          
+          if (!finalTitle || finalTitle.trim().length === 0) {
+            // Only generate if no title exists
+            const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
+            const analysis = await gemini.analyzeStory(allPrompts);
+            finalTitle = analysis.title;
+            visualStyle = analysis.visualStyle;
+            updateStep(step.id, { bookTitle: finalTitle, storyStyle: visualStyle });
+          }
           
           // Generate 1 cast name from story context
+          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
           const castName = await gemini.generateCastName(allPrompts);
           updateStep(step.id, { cast: castName });
           
           // Sync title to first page
           const firstPage = steps.find((s) => s.type === "first");
-          if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+          if (firstPage) updateStep(firstPage.id, { bookTitle: finalTitle, storyStyle: visualStyle });
           
-          // Generate title and cast image layers
+          // Generate ONLY ONE title image layer using the existing Lithuanian title
           setGenerationPhase("title");
           const titlePendingId = addPendingAsset("Cover Title Layer", step.id, step.type, "title");
           const titleUrl = await gemini.generateStepImage(
-            { ...step, bookTitle: analysis.title, coverPart: "title" } as any,
+            { ...step, bookTitle: finalTitle, storyStyle: visualStyle, coverPart: "title" } as any,
             ruleTexts,
             config
           );
-          updateStep(step.id, { generatedTitleUrl: titleUrl });
-          replacePendingAsset(titlePendingId, titleUrl, step.bookTitle || "");
+          updateStep(step.id, { generatedTitleUrl: titleUrl, storyStyle: visualStyle });
+          replacePendingAsset(titlePendingId, titleUrl, finalTitle);
 
+          // Generate cast image layer
           setGenerationPhase("cast");
           const castPendingId = addPendingAsset("Cover Cast Layer", step.id, step.type, "cast");
           const castUrl = await gemini.generateStepImage(
@@ -532,9 +545,11 @@ const App: React.FC = () => {
             config
           );
           updateStep(step.id, { generatedCastUrl: castUrl });
-          replacePendingAsset(castPendingId, castUrl, step.cast || "");
+          replacePendingAsset(castPendingId, castUrl, castName);
         } catch (error) {
           console.error("Error generating title/cast:", error);
+        } finally {
+          setIsGeneratingTitleCast(false);
         }
       }
       
@@ -573,49 +588,67 @@ const App: React.FC = () => {
 
   const handleApproval = async () => {
     const queue = activeQueueSteps;
-    const currentStep = steps[queue[currentQueueIndex]];
+    const stepIndex = queue[currentQueueIndex];
+    if (stepIndex === undefined) return;
     
-    // If approved step is a cover with showText enabled, generate title and cast
-    if (currentStep?.type === "cover" && currentStep.showText && !currentStep.generatedTitleUrl) {
+    // Get fresh step state
+    const currentStep = steps[stepIndex];
+    if (!currentStep) return;
+    
+    // If approved step is a cover with showText enabled, generate title and cast (only once)
+    if (currentStep.type === "cover" && currentStep.showText && !currentStep.generatedTitleUrl && !isGeneratingTitleCast) {
+      setIsGeneratingTitleCast(true);
       try {
         const gemini = getGemini();
         const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
         
-        // Generate 1 title
-        const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-        const analysis = await gemini.analyzeStory(allPrompts);
-        updateStep(currentStep.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+        // Use existing title from input if available, otherwise generate one
+        let finalTitle = currentStep.bookTitle;
+        let visualStyle = currentStep.storyStyle || "cinematic gold and light";
+        
+        if (!finalTitle || finalTitle.trim().length === 0) {
+          // Only generate if no title exists
+          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
+          const analysis = await gemini.analyzeStory(allPrompts);
+          finalTitle = analysis.title;
+          visualStyle = analysis.visualStyle;
+          updateStep(currentStep.id, { bookTitle: finalTitle, storyStyle: visualStyle });
+        }
         
         // Generate 1 cast name from story context
+        const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
         const castName = await gemini.generateCastName(allPrompts);
         updateStep(currentStep.id, { cast: castName });
         
         // Sync title to first page
         const firstPage = steps.find((s) => s.type === "first");
-        if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+        if (firstPage) updateStep(firstPage.id, { bookTitle: finalTitle, storyStyle: visualStyle });
         
-          // Generate title and cast image layers
-          setGenerationPhase("title");
-          const titlePendingId = addPendingAsset("Cover Title Layer", currentStep.id, currentStep.type, "title");
-          const titleUrl = await gemini.generateStepImage(
-            { ...currentStep, bookTitle: analysis.title, coverPart: "title" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(currentStep.id, { generatedTitleUrl: titleUrl });
-          replacePendingAsset(titlePendingId, titleUrl, currentStep.bookTitle || "");
+        // Generate ONLY ONE title image layer using the existing Lithuanian title
+        setGenerationPhase("title");
+        const titlePendingId = addPendingAsset("Cover Title Layer", currentStep.id, currentStep.type, "title");
+        const titleUrl = await gemini.generateStepImage(
+          { ...currentStep, bookTitle: finalTitle, storyStyle: visualStyle, coverPart: "title" } as any,
+          ruleTexts,
+          config
+        );
+        updateStep(currentStep.id, { generatedTitleUrl: titleUrl, storyStyle: visualStyle });
+        replacePendingAsset(titlePendingId, titleUrl, finalTitle);
 
-          setGenerationPhase("cast");
-          const castPendingId = addPendingAsset("Cover Cast Layer", currentStep.id, currentStep.type, "cast");
-          const castUrl = await gemini.generateStepImage(
-            { ...currentStep, cast: castName, coverPart: "cast" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(currentStep.id, { generatedCastUrl: castUrl });
-          replacePendingAsset(castPendingId, castUrl, currentStep.cast || "");
+        // Generate cast image layer
+        setGenerationPhase("cast");
+        const castPendingId = addPendingAsset("Cover Cast Layer", currentStep.id, currentStep.type, "cast");
+        const castUrl = await gemini.generateStepImage(
+          { ...currentStep, cast: castName, coverPart: "cast" } as any,
+          ruleTexts,
+          config
+        );
+        updateStep(currentStep.id, { generatedCastUrl: castUrl });
+        replacePendingAsset(castPendingId, castUrl, castName);
       } catch (error) {
         console.error("Error generating title/cast:", error);
+      } finally {
+        setIsGeneratingTitleCast(false);
       }
     }
     
@@ -656,7 +689,51 @@ const App: React.FC = () => {
     const stepIndex = steps.findIndex((s) => s.id === stepId);
     if (stepIndex === -1) return;
     
-    await executeCurrentStep(stepIndex);
+    const step = steps[stepIndex];
+    if (!step || !step.prompt.trim()) return;
+    
+    // Update step status to generating
+    setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, status: "generating" } : s)));
+    
+    try {
+      const gemini = getGemini();
+      const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
+      const previousImage = stepIndex > 0 ? steps[stepIndex - 1].generatedImageUrl : undefined;
+
+      if (step.type === "cover") {
+        // Only generate background for cover
+        setGenerationPhase("background");
+        const pendingId = addPendingAsset("Cover Background (Seamless)", step.id, step.type, "background");
+        const bgUrl = await gemini.generateStepImage(
+          { ...step, coverPart: "background" } as any,
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        updateStep(step.id, { generatedImageUrl: bgUrl });
+        replacePendingAsset(pendingId, bgUrl, step.prompt);
+      } else {
+        setGenerationPhase("scene");
+        const label = step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${stepIndex - 1} Artwork`;
+        const pendingId = addPendingAsset(label, step.id, step.type);
+        const imageUrl = await gemini.generateStepImage(
+          step,
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        updateStep(step.id, { generatedImageUrl: imageUrl });
+        replacePendingAsset(pendingId, imageUrl, step.prompt);
+      }
+      
+      setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, status: "completed" } : s)));
+      setGenerationPhase("idle");
+    } catch (err: any) {
+      setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, status: "error", error: err.message } : s)));
+      setGenerationPhase("idle");
+    }
   };
 
   const downloadImage = (url: string, label: string) => {
@@ -1051,7 +1128,55 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex-1 flex flex-col items-center justify-center text-center">
-              {!currentActiveStep ? (
+              {selectedAssetForPreview ? (
+                // Show selected asset preview
+                (() => {
+                  const selectedAsset = assets.find(a => a.id === selectedAssetForPreview);
+                  if (!selectedAsset) {
+                    setSelectedAssetForPreview(null);
+                    return null;
+                  }
+                  return (
+                    <div className="w-full space-y-6 animate-in fade-in duration-700">
+                      <div
+                        className="relative aspect-video w-full rounded-sm overflow-hidden bg-slate-950 border-none shadow-none"
+                        style={{ aspectRatio: config.aspectRatio.replace(":", "/") }}
+                      >
+                        {selectedAsset.isPending ? (
+                          <div className="absolute inset-0 bg-slate-950/98 flex flex-col items-center justify-center gap-6 z-50">
+                            <div className="w-12 h-12 border-2 border-blue-500/10 border-t-blue-500 rounded-full animate-spin" />
+                            <span className="text-[9px] font-black text-blue-500 uppercase tracking-[0.7em] animate-pulse">
+                              Generating...
+                            </span>
+                          </div>
+                        ) : (
+                          <img
+                            src={selectedAsset.url}
+                            className="w-full h-full object-cover"
+                            alt={selectedAsset.label}
+                          />
+                        )}
+                        <div className="absolute top-4 left-4">
+                          <div className="bg-black/20 backdrop-blur-xl px-3 py-1 rounded-full flex items-center gap-2">
+                            <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
+                            <span className="text-[8px] font-black text-white uppercase tracking-[0.2em]">
+                              PREVIEW
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="max-w-xl mx-auto px-4">
+                        <p className="text-[10px] text-slate-400 font-medium italic leading-relaxed">
+                          {selectedAsset.label}
+                        </p>
+                        <p className="text-[7px] text-slate-500 font-black uppercase tracking-widest mt-2">
+                          {new Date(selectedAsset.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : !currentActiveStep ? (
                 <div className="opacity-10 py-16">
                   <svg
                     className="w-24 h-24 text-slate-400 mb-6 mx-auto"
@@ -1164,7 +1289,12 @@ const App: React.FC = () => {
                 assets.map((asset) => (
                   <div
                     key={asset.id}
-                    className="group flex items-center gap-4 p-2.5 bg-slate-900/40 rounded border border-white/5 hover:border-white/10 transition-all animate-in slide-in-from-left-4 duration-300"
+                    onClick={() => !asset.isPending && setSelectedAssetForPreview(asset.id)}
+                    className={`group flex items-center gap-4 p-2.5 rounded border transition-all animate-in slide-in-from-left-4 duration-300 cursor-pointer ${
+                      selectedAssetForPreview === asset.id
+                        ? "bg-blue-900/40 border-blue-500/50"
+                        : "bg-slate-900/40 border-white/5 hover:border-white/10"
+                    } ${asset.isPending ? "cursor-not-allowed opacity-60" : ""}`}
                   >
                     <div className="w-16 aspect-video rounded-sm overflow-hidden bg-black shrink-0 flex items-center justify-center">
                       {asset.isPending ? (
