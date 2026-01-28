@@ -34,3 +34,30 @@ export interface GenerationContext {
   steps: ImageStep[];
   rules: GlobalRule[];
 }
+
+export interface RenderedAsset {
+  id: string;
+  url: string;
+  label: string;
+  timestamp: number;
+  stepId?: string;
+  stepType?: string;
+  coverPart?: "background" | "title" | "cast";
+  originalPrompt?: string;
+  isPending?: boolean;
+}
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  savedAt: number;
+  bookInput?: import("./services/bookTextService").BookInput;
+  bookOutputs?: import("./services/bookTextService").BookOutputs;
+  selectedTitle?: string;
+  steps: ImageStep[];
+  assets: RenderedAsset[];
+  config: GlobalConfig;
+  characterRef: string | null;
+  rules: GlobalRule[];
+  quickPasteText: string;
+}

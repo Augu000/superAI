@@ -1,7 +1,7 @@
 // src/App.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
-import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, SavedProject } from "./types";
+import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, SavedProject, RenderedAsset } from "./types";
 import { GeminiService } from "./services/geminiService";
 import type { BookInput, BookOutputs } from "./services/bookTextService";
 
@@ -9,17 +9,6 @@ import StepInput from "./components/StepInput";
 import RuleInput from "./components/RuleInput";
 import BookGenerator from "./components/BookGenerator";
 
-interface RenderedAsset {
-  id: string;
-  url: string;
-  label: string;
-  timestamp: number;
-  stepId?: string;
-  stepType?: string;
-  coverPart?: "background" | "title" | "cast";
-  originalPrompt?: string;
-  isPending?: boolean;
-}
 
 const App: React.FC = () => {
   const createInitialSteps = (): ImageStep[] => {
@@ -271,11 +260,11 @@ const App: React.FC = () => {
     }
 
     // Load Image Room data
-    setSteps(project.steps.map(s => ({ ...s })));
-    setAssets(project.assets.map(a => ({ ...a })));
+    setSteps(project.steps.map((s: ImageStep) => ({ ...s })));
+    setAssets(project.assets.map((a: RenderedAsset) => ({ ...a })));
     setConfig({ ...project.config });
     setCharacterRef(project.characterRef);
-    setRules(project.rules.map(r => ({ ...r })));
+    setRules(project.rules.map((r: GlobalRule) => ({ ...r })));
     setQuickPasteText(project.quickPasteText);
 
     setShowSavedProjects(false);
