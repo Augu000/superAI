@@ -20,4 +20,8 @@ export default defineConfig({
       host: 'localhost',
     },
   },
+  optimizeDeps: {
+    exclude: ['index.html'],
+  },
+  assetsInclude: ['**/*.html'],
 });
