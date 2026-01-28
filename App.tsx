@@ -36,12 +36,19 @@ const App: React.FC = () => {
     });
     steps.push({
       id: uuidv4(),
-      type: "first",
+      type: "title",
       prompt: "",
       status: "idle",
       textSide: "none",
       bookTitle: "",
       cast: "",
+    });
+    steps.push({
+      id: uuidv4(),
+      type: "first",
+      prompt: "",
+      status: "idle",
+      textSide: "left", // Default text side for first spread
     });
     steps.push({
       id: uuidv4(),
@@ -67,12 +74,13 @@ const App: React.FC = () => {
   });
 
   const [isProcessActive, setIsProcessActive] = useState(false);
+  const isProcessActiveRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
   const [isSuggestingTitle, setIsSuggestingTitle] = useState(false);
-  const [isGeneratingTitleCast, setIsGeneratingTitleCast] = useState(false);
+  // const [isGeneratingTitleCast, setIsGeneratingTitleCast] = useState(false); // Removed - cover overlays deprecated
 
   const [quickPasteText, setQuickPasteText] = useState("");
   const [showQuickPaste, setShowQuickPaste] = useState(false);
@@ -87,6 +95,7 @@ const App: React.FC = () => {
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [bookGeneratorKey, setBookGeneratorKey] = useState(0);
   const [showAssetGallery, setShowAssetGallery] = useState(false);
+  const [isGalleryMinimized, setIsGalleryMinimized] = useState(false);
   const [regeneratingAssetId, setRegeneratingAssetId] = useState<string | null>(null);
   const [regenerateEditPrompt, setRegenerateEditPrompt] = useState("");
   const [selectedAssetForPreview, setSelectedAssetForPreview] = useState<string | null>(null);
@@ -117,11 +126,15 @@ const App: React.FC = () => {
   };
 
   const replacePendingAsset = (pendingId: string, url: string, originalPrompt?: string) => {
-    setAssets((prev) => prev.map((a) => 
-      a.id === pendingId 
+    setAssets((prev) => prev.map((a) =>
+      a.id === pendingId
         ? { ...a, url, isPending: false, originalPrompt, timestamp: Date.now() }
         : a
     ));
+  };
+
+  const removePendingAsset = (pendingId: string) => {
+    setAssets((prev) => prev.filter((a) => a.id !== pendingId));
   };
 
   const addSpread = () => {
@@ -283,6 +296,7 @@ const App: React.FC = () => {
   ) => {
     // Find existing steps
     const coverStep = steps.find((s) => s.type === "cover");
+    const titleStep = steps.find((s) => s.type === "title");
     const firstStep = steps.find((s) => s.type === "first");
     const lastStep = steps.find((s) => s.type === "last");
     const middleSteps = steps.filter((s) => s.type === "middle");
@@ -297,47 +311,57 @@ const App: React.FC = () => {
       });
     }
 
-    // Update first/intro page with title
-    if (firstStep) {
-      // Extract intro text from storyLt if available
-      let introPrompt = "Cinematic Logo";
-      if (outputs.storyLt) {
-        const introMatch = outputs.storyLt.match(/Spread\s+1\s*\(TEXT\)\s*:?\s*(.+?)(?=Spread\s+2|$)/is);
-        if (introMatch) {
-          introPrompt = `Intro: ${introMatch[1].trim()}`;
-        }
-      }
-      updateStep(firstStep.id, {
-        prompt: introPrompt,
-        bookTitle: selectedTitle || firstStep.bookTitle,
+    // Update Title card with 3D Logo Prompt from Book Generator
+    if (titleStep) {
+      updateStep(titleStep.id, {
+        prompt: outputs.titleLogoPromptEn || titleStep.prompt,
+        bookTitle: selectedTitle || titleStep.bookTitle,
       });
     }
 
-    // Parse and update middle spreads from spreadPromptsEn
+    // Parse spread prompts (EN) and assign to Spread 1 + middle spreads
+    // All spread images use Spread Prompts (EN) only – not Story (LT)
     if (outputs.spreadPromptsEn) {
       const spreadChunks = outputs.spreadPromptsEn
         .split(/\n(?=Spread\s+\d+\s+\(PROMPT\)\s*:)/gi)
         .map((s) => s.trim())
         .filter(Boolean);
 
-      // Create new middle steps from parsed spreads and replace all steps in one batch
+      const cleanPrompt = (chunk: string) =>
+        chunk.replace(/Spread\s+\d+\s*\(PROMPT\)\s*:?\s*/gi, "").trim();
+
+      // Spread 1 (PROMPT) → first step; Spread 2+ (PROMPT) → middle steps
+      const spread1Prompt = spreadChunks.length > 0 ? cleanPrompt(spreadChunks[0]) : "";
+      const spread2PlusChunks = spreadChunks.slice(1);
+
       setSteps((prevSteps) => {
         const cover = prevSteps.find((s) => s.type === "cover")!;
+        const title = prevSteps.find((s) => s.type === "title");
         const first = prevSteps.find((s) => s.type === "first")!;
         const last = prevSteps.find((s) => s.type === "last")!;
 
-        const newMiddleSteps: ImageStep[] = spreadChunks.map((chunk) => {
-          const cleanPrompt = chunk.replace(/Spread\s+\d+\s*\(PROMPT\)\s*:?\s*/gi, "").trim();
-          return {
-            id: uuidv4(),
-            type: "middle" as const,
-            prompt: cleanPrompt || "",
-            status: "idle" as const,
-            textSide: "none" as const,
-          };
-        });
+        const firstUpdated = {
+          ...first,
+          prompt: spread1Prompt || first.prompt,
+        };
 
-        return [cover, first, ...newMiddleSteps, last];
+        const newMiddleSteps: ImageStep[] = spread2PlusChunks.map((chunk) => ({
+          id: uuidv4(),
+          type: "middle" as const,
+          prompt: cleanPrompt(chunk) || "",
+          status: "idle" as const,
+          textSide: "none" as const,
+        }));
+
+        if (!title) {
+          return [cover, firstUpdated, ...newMiddleSteps, last];
+        }
+        const titleUpdated = {
+          ...title,
+          prompt: outputs.titleLogoPromptEn || title.prompt,
+          bookTitle: selectedTitle || title.bookTitle,
+        };
+        return [cover, titleUpdated, firstUpdated, ...newMiddleSteps, last];
       });
     }
 
@@ -413,15 +437,16 @@ const App: React.FC = () => {
     const step = steps[index];
     setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "generating" } : s)));
 
+    let pendingId: string | null = null;
+
     try {
       const gemini = getGemini();
       const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
       const previousImage = index > 0 ? steps[index - 1].generatedImageUrl : undefined;
 
       if (step.type === "cover") {
-        // Only generate background initially, title and cast will be generated after approval
         setGenerationPhase("background");
-        const pendingId = addPendingAsset("Cover Background (Seamless)", step.id, step.type, "background");
+        pendingId = addPendingAsset("Cover Background (Seamless)", step.id, step.type, "background");
         const bgUrl = await gemini.generateStepImage(
           { ...step, coverPart: "background" } as any,
           ruleTexts,
@@ -431,12 +456,31 @@ const App: React.FC = () => {
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
         replacePendingAsset(pendingId, bgUrl, step.prompt);
-
         setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "completed" } : s)));
+      } else if (step.type === "title") {
+        setGenerationPhase("title");
+        pendingId = addPendingAsset("Book Title Page", step.id, step.type);
+        const imageUrl = await gemini.generateStepImage(
+          step,
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        updateStep(step.id, { generatedImageUrl: imageUrl });
+        replacePendingAsset(pendingId, imageUrl, step.bookTitle || "Book Title");
+        setSteps((prev) =>
+          prev.map((s, idx) => (idx === index ? { ...s, status: "completed", generatedImageUrl: imageUrl } : s))
+        );
       } else {
         setGenerationPhase("scene");
-        const label = step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${index - 1} Artwork`;
-        const pendingId = addPendingAsset(label, step.id, step.type);
+        const label =
+          step.type === "last"
+            ? "Ending Card"
+            : step.type === "first"
+              ? "Spread 1 Artwork"
+              : `Spread ${index - 1} Artwork`;
+        pendingId = addPendingAsset(label, step.id, step.type);
         const imageUrl = await gemini.generateStepImage(
           step,
           ruleTexts,
@@ -454,13 +498,15 @@ const App: React.FC = () => {
       setAwaitingApproval(true);
     } catch (err: any) {
       setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "error", error: err.message } : s)));
+      if (pendingId) removePendingAsset(pendingId);
       setIsProcessActive(false);
+      isProcessActiveRef.current = false;
       setGenerationPhase("idle");
     }
   };
 
   const activeQueueSteps = steps
-    .map((s, i) => (s.prompt.trim() || s.type === "cover" || s.type === "first" || s.type === "last" ? i : -1))
+    .map((s, i) => (s.prompt.trim() || s.type === "cover" || s.type === "title" || s.type === "last" ? i : -1))
     .filter((i) => i !== -1);
 
   const currentActiveStep = currentQueueIndex >= 0 ? steps[activeQueueSteps[currentQueueIndex]] : null;
@@ -469,6 +515,7 @@ const App: React.FC = () => {
     const queue = activeQueueSteps;
     if (queue.length === 0) return;
     setIsProcessActive(true);
+    isProcessActiveRef.current = true;
     setIsPaused(false);
     isPausedRef.current = false;
     setCurrentQueueIndex(0);
@@ -477,83 +524,24 @@ const App: React.FC = () => {
     // Generate all steps sequentially without approval
     for (let i = 0; i < queue.length; i++) {
       // Check if paused
-      while (isPausedRef.current && isProcessActive) {
+      while (isPausedRef.current && isProcessActiveRef.current) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       // Check if process was stopped
-      if (!isProcessActive) break;
+      if (!isProcessActiveRef.current) break;
       
       setCurrentQueueIndex(i);
       await executeCurrentStep(queue[i]);
       
       // Check if paused after step
-      while (isPausedRef.current && isProcessActive) {
+      while (isPausedRef.current && isProcessActiveRef.current) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       
-      if (!isProcessActive) break;
+      if (!isProcessActiveRef.current) break;
       
-      // Auto-approve and continue
-      const step = steps[queue[i]];
-      if (step.type === "cover" && step.showText && !step.generatedTitleUrl && !isGeneratingTitleCast) {
-        // Generate title and cast for cover (only once)
-        setIsGeneratingTitleCast(true);
-        try {
-          const gemini = getGemini();
-          const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
-          
-          // Use existing title from input if available, otherwise generate one
-          let finalTitle = step.bookTitle;
-          let visualStyle = step.storyStyle || "cinematic gold and light";
-          
-          if (!finalTitle || finalTitle.trim().length === 0) {
-            // Only generate if no title exists
-            const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-            const analysis = await gemini.analyzeStory(allPrompts);
-            finalTitle = analysis.title;
-            visualStyle = analysis.visualStyle;
-            updateStep(step.id, { bookTitle: finalTitle, storyStyle: visualStyle });
-          }
-          
-          // Generate 1 cast name from story context
-          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-          const castName = await gemini.generateCastName(allPrompts);
-          updateStep(step.id, { cast: castName });
-          
-          // Sync title to first page
-          const firstPage = steps.find((s) => s.type === "first");
-          if (firstPage) updateStep(firstPage.id, { bookTitle: finalTitle, storyStyle: visualStyle });
-          
-          // Generate ONLY ONE title image layer using the existing Lithuanian title
-          setGenerationPhase("title");
-          const titlePendingId = addPendingAsset("Cover Title Layer", step.id, step.type, "title");
-          const titleUrl = await gemini.generateStepImage(
-            { ...step, bookTitle: finalTitle, storyStyle: visualStyle, coverPart: "title" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(step.id, { generatedTitleUrl: titleUrl, storyStyle: visualStyle });
-          replacePendingAsset(titlePendingId, titleUrl, finalTitle);
-
-          // Generate cast image layer
-          setGenerationPhase("cast");
-          const castPendingId = addPendingAsset("Cover Cast Layer", step.id, step.type, "cast");
-          const castUrl = await gemini.generateStepImage(
-            { ...step, cast: castName, coverPart: "cast" } as any,
-            ruleTexts,
-            config
-          );
-          updateStep(step.id, { generatedCastUrl: castUrl });
-          replacePendingAsset(castPendingId, castUrl, castName);
-        } catch (error) {
-          console.error("Error generating title/cast:", error);
-        } finally {
-          setIsGeneratingTitleCast(false);
-        }
-      }
-      
-      // Move to next step
+      // Move to next step (no Cover Title/Cast overlays; title typography lives on Book Title spread)
       if (i < queue.length - 1) {
         setCurrentQueueIndex(i + 1);
         setAwaitingApproval(false);
@@ -561,6 +549,7 @@ const App: React.FC = () => {
     }
     
     setIsProcessActive(false);
+    isProcessActiveRef.current = false;
     setIsPaused(false);
     setCurrentQueueIndex(-1);
     setAwaitingApproval(false);
@@ -579,6 +568,7 @@ const App: React.FC = () => {
 
   const handleStop = () => {
     setIsProcessActive(false);
+    isProcessActiveRef.current = false;
     setIsPaused(false);
     isPausedRef.current = false;
     setCurrentQueueIndex(-1);
@@ -594,64 +584,8 @@ const App: React.FC = () => {
     // Get fresh step state
     const currentStep = steps[stepIndex];
     if (!currentStep) return;
-    
-    // If approved step is a cover with showText enabled, generate title and cast (only once)
-    if (currentStep.type === "cover" && currentStep.showText && !currentStep.generatedTitleUrl && !isGeneratingTitleCast) {
-      setIsGeneratingTitleCast(true);
-      try {
-        const gemini = getGemini();
-        const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
-        
-        // Use existing title from input if available, otherwise generate one
-        let finalTitle = currentStep.bookTitle;
-        let visualStyle = currentStep.storyStyle || "cinematic gold and light";
-        
-        if (!finalTitle || finalTitle.trim().length === 0) {
-          // Only generate if no title exists
-          const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-          const analysis = await gemini.analyzeStory(allPrompts);
-          finalTitle = analysis.title;
-          visualStyle = analysis.visualStyle;
-          updateStep(currentStep.id, { bookTitle: finalTitle, storyStyle: visualStyle });
-        }
-        
-        // Generate 1 cast name from story context
-        const allPrompts = steps.map((s) => s.prompt).filter((p) => p && p.trim().length > 0);
-        const castName = await gemini.generateCastName(allPrompts);
-        updateStep(currentStep.id, { cast: castName });
-        
-        // Sync title to first page
-        const firstPage = steps.find((s) => s.type === "first");
-        if (firstPage) updateStep(firstPage.id, { bookTitle: finalTitle, storyStyle: visualStyle });
-        
-        // Generate ONLY ONE title image layer using the existing Lithuanian title
-        setGenerationPhase("title");
-        const titlePendingId = addPendingAsset("Cover Title Layer", currentStep.id, currentStep.type, "title");
-        const titleUrl = await gemini.generateStepImage(
-          { ...currentStep, bookTitle: finalTitle, storyStyle: visualStyle, coverPart: "title" } as any,
-          ruleTexts,
-          config
-        );
-        updateStep(currentStep.id, { generatedTitleUrl: titleUrl, storyStyle: visualStyle });
-        replacePendingAsset(titlePendingId, titleUrl, finalTitle);
 
-        // Generate cast image layer
-        setGenerationPhase("cast");
-        const castPendingId = addPendingAsset("Cover Cast Layer", currentStep.id, currentStep.type, "cast");
-        const castUrl = await gemini.generateStepImage(
-          { ...currentStep, cast: castName, coverPart: "cast" } as any,
-          ruleTexts,
-          config
-        );
-        updateStep(currentStep.id, { generatedCastUrl: castUrl });
-        replacePendingAsset(castPendingId, castUrl, castName);
-      } catch (error) {
-        console.error("Error generating title/cast:", error);
-      } finally {
-        setIsGeneratingTitleCast(false);
-      }
-    }
-    
+    // No Cover Title/Cast overlays; title typography lives on Book Title spread
     const nextQueueIdx = currentQueueIndex + 1;
     if (nextQueueIdx < queue.length) {
       setCurrentQueueIndex(nextQueueIdx);
@@ -659,6 +593,7 @@ const App: React.FC = () => {
       await executeCurrentStep(queue[nextQueueIdx]);
     } else {
       setIsProcessActive(false);
+      isProcessActiveRef.current = false;
       setCurrentQueueIndex(-1);
       setAwaitingApproval(false);
     }
@@ -684,8 +619,8 @@ const App: React.FC = () => {
       updateStep(id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
 
       // Sync style across pages for consistency
-      const firstPage = steps.find((s) => s.type === "first");
-      if (firstPage) updateStep(firstPage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
+      const titlePage = steps.find((s) => s.type === "title");
+      if (titlePage) updateStep(titlePage.id, { bookTitle: analysis.title, storyStyle: analysis.visualStyle });
 
       const lastPage = steps.find((s) => s.type === "last");
       if (lastPage) updateStep(lastPage.id, { storyStyle: analysis.visualStyle });
@@ -699,7 +634,8 @@ const App: React.FC = () => {
     if (stepIndex === -1) return;
     
     const step = steps[stepIndex];
-    if (!step || !step.prompt.trim()) return;
+    // Title steps can generate without a prompt (they use bookTitle)
+    if (!step || (!step.prompt.trim() && step.type !== "title")) return;
     
     // Update step status to generating
     setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, status: "generating" } : s)));
@@ -722,9 +658,22 @@ const App: React.FC = () => {
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
         replacePendingAsset(pendingId, bgUrl, step.prompt);
+      } else if (step.type === "title") {
+        // Generate book title page
+        setGenerationPhase("title");
+        const pendingId = addPendingAsset("Book Title Page", step.id, step.type);
+        const imageUrl = await gemini.generateStepImage(
+          step,
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        updateStep(step.id, { generatedImageUrl: imageUrl });
+        replacePendingAsset(pendingId, imageUrl, step.bookTitle || "Book Title");
       } else {
         setGenerationPhase("scene");
-        const label = step.type === "first" ? "Intro Card" : step.type === "last" ? "Ending Card" : `Spread ${stepIndex - 1} Artwork`;
+        const label = step.type === "last" ? "Ending Card" : step.type === "first" ? "Spread 1 Artwork" : `Spread ${stepIndex - 1} Artwork`;
         const pendingId = addPendingAsset(label, step.id, step.type);
         const imageUrl = await gemini.generateStepImage(
           step,
@@ -789,10 +738,30 @@ const App: React.FC = () => {
       const gemini = getGemini();
       const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
       
-      // Enhance the original prompt with user edits
+      // Enhance the original prompt with user edits - keep original context + add edit request
       const enhancedPrompt = asset.originalPrompt 
-        ? `${asset.originalPrompt}. User edits: ${regenerateEditPrompt.trim()}`
+        ? `${asset.originalPrompt}. EDIT REQUEST: ${regenerateEditPrompt.trim()}. Keep the same overall composition, characters, and scene - only apply the requested changes.`
         : regenerateEditPrompt.trim();
+
+      // Convert current image to base64 for reference (maintains visual consistency)
+      let referenceImageBase64: string | undefined;
+      if (asset.url && asset.url.startsWith('data:')) {
+        // Already base64
+        referenceImageBase64 = asset.url;
+      } else if (asset.url) {
+        // Fetch and convert to base64
+        try {
+          const response = await fetch(asset.url);
+          const blob = await response.blob();
+          referenceImageBase64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          console.warn("Could not convert image to base64 for reference:", e);
+        }
+      }
 
       let newUrl: string;
       
@@ -810,7 +779,10 @@ const App: React.FC = () => {
         newUrl = await gemini.generateStepImage(
           { ...stepWithEdit, coverPart: asset.coverPart } as any,
           ruleTexts,
-          config
+          config,
+          undefined, // previousImage
+          characterRef || undefined,
+          referenceImageBase64 // Pass reference image for consistency
         );
         
         // Update the step with new URL
@@ -823,14 +795,13 @@ const App: React.FC = () => {
         }
       } else {
         // Regenerate regular step
-        const previousImage = stepIndex > 0 ? steps[stepIndex - 1]?.generatedImageUrl : undefined;
-        
         newUrl = await gemini.generateStepImage(
           { ...step, prompt: enhancedPrompt },
           ruleTexts,
           config,
-          previousImage,
-          characterRef || undefined
+          undefined, // Don't use previousImage for continuity during regeneration
+          characterRef || undefined,
+          referenceImageBase64 // Pass reference image for consistency
         );
         
         updateStep(step.id, { generatedImageUrl: newUrl });
@@ -846,6 +817,77 @@ const App: React.FC = () => {
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
       setRegeneratingAssetId(null);
       setRegenerateEditPrompt("");
+    }
+  };
+
+  // Quick regenerate - uses original prompt and global rules only, no edits
+  const handleQuickRegenerate = async (asset: RenderedAsset) => {
+    if (!asset.stepId) return;
+    
+    // Prevent multiple simultaneous regenerations
+    const isAnyRegenerating = assets.some((a) => a.isPending);
+    if (isAnyRegenerating) {
+      console.log("Another asset is already regenerating, please wait");
+      return;
+    }
+    
+    // Mark as pending to show spinner
+    setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: true } : a));
+    
+    try {
+      const stepIndex = steps.findIndex((s) => s.id === asset.stepId);
+      if (stepIndex === -1) {
+        setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
+        return;
+      }
+      
+      const step = steps[stepIndex];
+      const gemini = getGemini();
+      const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
+      
+      // Use the original prompt from the asset or step
+      const originalPrompt = asset.originalPrompt || step.prompt;
+
+      let newUrl: string;
+      
+      if (asset.coverPart) {
+        // Regenerate cover part with original settings
+        newUrl = await gemini.generateStepImage(
+          { ...step, coverPart: asset.coverPart } as any,
+          ruleTexts,
+          config,
+          undefined,
+          characterRef || undefined
+        );
+        
+        // Update the step with new URL
+        if (asset.coverPart === "background") {
+          updateStep(step.id, { generatedImageUrl: newUrl });
+        } else if (asset.coverPart === "title") {
+          updateStep(step.id, { generatedTitleUrl: newUrl });
+        } else if (asset.coverPart === "cast") {
+          updateStep(step.id, { generatedCastUrl: newUrl });
+        }
+      } else {
+        // Regenerate regular step with original prompt
+        const previousImage = stepIndex > 0 ? steps[stepIndex - 1]?.generatedImageUrl : undefined;
+        
+        newUrl = await gemini.generateStepImage(
+          { ...step, prompt: originalPrompt },
+          ruleTexts,
+          config,
+          previousImage,
+          characterRef || undefined
+        );
+        
+        updateStep(step.id, { generatedImageUrl: newUrl });
+      }
+
+      // Update asset with new image (keep original prompt)
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, url: newUrl, timestamp: Date.now(), isPending: false } : a));
+    } catch (error) {
+      console.error("Error quick regenerating asset:", error);
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
     }
   };
 
@@ -992,44 +1034,6 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="glass-panel p-6 rounded space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-purple-500" />
-                Script Ingest
-              </h2>
-              <button
-                onClick={() => setShowQuickPaste(!showQuickPaste)}
-                className="p-1 rounded hover:bg-white/5 transition-colors text-slate-500"
-              >
-                <svg
-                  className={`w-3 h-3 transition-transform ${showQuickPaste ? "rotate-180" : ""}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-
-            {showQuickPaste && (
-              <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                <textarea
-                  value={quickPasteText}
-                  onChange={(e) => setQuickPasteText(e.target.value)}
-                  placeholder="Paste script blocks..."
-                  className="w-full h-32 bg-slate-900/50 border border-white/5 rounded p-3 text-[9px] text-slate-300 focus:border-purple-500/50 outline-none resize-none custom-scrollbar"
-                />
-                <button
-                  onClick={handleQuickPaste}
-                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded font-black text-[9px] uppercase tracking-widest transition-all shadow-lg shadow-purple-600/10"
-                >
-                  Process Script
-                </button>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Story Timeline */}
@@ -1047,6 +1051,66 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-3">
+            {/* Global Rules Section - Always visible */}
+            <div className="glass-panel p-4 rounded-lg border border-yellow-500/20 mb-2">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[9px] font-black text-yellow-500 uppercase tracking-widest flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                  Global Rules
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setRules([...rules, { id: uuidv4(), text: "" }])}
+                    className="text-[7px] font-black text-yellow-500/70 hover:text-yellow-400 uppercase tracking-widest transition-colors flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Rule
+                  </button>
+                  {rules.length > 0 && (
+                    <button
+                      onClick={() => setRules([])}
+                      className="text-[7px] font-black text-slate-600 hover:text-rose-500 uppercase tracking-widest transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+              </div>
+              {rules.length === 0 ? (
+                <p className="text-[8px] text-slate-500 italic">
+                  No global rules set. Add rules here or transfer from Book Generator.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {rules.map((rule, ruleIndex) => (
+                    <div key={rule.id} className="relative">
+                      <textarea
+                        value={rule.text}
+                        onChange={(e) => {
+                          const newRules = [...rules];
+                          newRules[ruleIndex] = { ...rule, text: e.target.value };
+                          setRules(newRules);
+                        }}
+                        placeholder="Enter styling rule (e.g., 'Character Anchor: A 6-year-old boy with brown hair...')"
+                        className="w-full bg-slate-900/50 p-3 rounded border border-white/5 text-[9px] text-slate-300 font-mono leading-relaxed focus:border-yellow-500/50 outline-none resize-none min-h-[80px]"
+                      />
+                      <button
+                        onClick={() => setRules(rules.filter((r) => r.id !== rule.id))}
+                        className="absolute top-2 right-2 p-1 rounded hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all"
+                        title="Remove rule"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {steps.map((step, idx) => (
               <StepInput
                 key={step.id}
@@ -1054,10 +1118,10 @@ const App: React.FC = () => {
                 step={step}
                 onUpdate={updateStep}
                 onDelete={step.type === "middle" ? deleteStep : undefined}
-                onGenerateTitle={step.type === "cover" ? handleGenerateTitle : undefined}
-                onGenerate={step.prompt.trim() && !isProcessActive ? () => handleGenerateSingleStep(step.id) : undefined}
+                onGenerateTitle={step.type === "title" ? handleGenerateTitle : undefined}
+                onGenerate={(step.prompt.trim() || step.type === "title") && !isProcessActive ? () => handleGenerateSingleStep(step.id) : undefined}
                 disabled={isProcessActive && !isPaused}
-                isSuggestingTitle={step.type === "cover" && isSuggestingTitle}
+                isSuggestingTitle={step.type === "title" && isSuggestingTitle}
               />
             ))}
 
@@ -1113,9 +1177,9 @@ const App: React.FC = () => {
             ) : (
               <button
                 onClick={startNarrativeFlow}
-                disabled={steps.every((s) => !s.prompt.trim())}
+                disabled={activeQueueSteps.length === 0}
                 className={`w-1/3 px-6 py-4 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all ${
-                  steps.every((s) => !s.prompt.trim())
+                  activeQueueSteps.length === 0
                     ? "bg-slate-800 text-slate-500 cursor-not-allowed"
                     : "bg-[#3355FF] hover:bg-[#2a44cc] text-white shadow-lg shadow-[#3355FF]/20 active:scale-95"
                 }`}
@@ -1437,26 +1501,44 @@ const App: React.FC = () => {
       )}
 
       {/* Asset Gallery Modal */}
-      {showAssetGallery && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowAssetGallery(false)}>
-          <div className="glass-panel rounded-2xl p-6 max-w-6xl w-full mx-4 border border-white/10 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+      {showAssetGallery && !isGalleryMinimized && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowAssetGallery(false)}>
+          <div className="glass-panel rounded-2xl p-6 max-w-6xl w-full mx-4 border border-white/10 max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4 duration-300" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-sm font-black text-white uppercase tracking-widest">Asset Gallery</h3>
-              <button
-                onClick={() => setShowAssetGallery(false)}
-                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-1">
+                {/* Minimize button */}
+                <button
+                  onClick={() => setIsGalleryMinimized(true)}
+                  className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition-all"
+                  title="Minimize"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  </svg>
+                </button>
+                {/* Close button */}
+                <button
+                  onClick={() => setShowAssetGallery(false)}
+                  className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all"
+                  title="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {assets.map((asset) => {
-                  const isRegenerating = regeneratingAssetId === asset.id;
-                  const showSpinner = asset.isPending || isRegenerating;
+                  // isEditing = edit panel is open for this asset (for input)
+                  const isEditing = regeneratingAssetId === asset.id;
+                  // isGenerating = actual regeneration in progress (spinner should show)
+                  const isGenerating = asset.isPending;
+                  // Show spinner ONLY when actually generating, not when just editing
+                  const showSpinner = isGenerating;
                   
                   return (
                   <div
@@ -1469,7 +1551,7 @@ const App: React.FC = () => {
                           <div className="flex flex-col items-center gap-3">
                             <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
                             <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">
-                              {isRegenerating ? "Regenerating..." : "Generating..."}
+                              Regenerating...
                             </p>
                           </div>
                         </div>
@@ -1480,10 +1562,10 @@ const App: React.FC = () => {
                     <div className="p-3">
                       <p className="text-[9px] font-black text-white uppercase tracking-tight mb-1">{asset.label}</p>
                       <p className="text-[7px] text-slate-500 uppercase tracking-widest mb-3">
-                        {showSpinner ? (isRegenerating ? "Regenerating..." : "Generating...") : new Date(asset.timestamp).toLocaleString()}
+                        {showSpinner ? "Regenerating..." : new Date(asset.timestamp).toLocaleString()}
                       </p>
                       
-                      {regeneratingAssetId === asset.id ? (
+                      {isEditing ? (
                         <div className="space-y-2">
                           <textarea
                             value={regenerateEditPrompt}
@@ -1491,36 +1573,50 @@ const App: React.FC = () => {
                             placeholder="Describe the changes you want (e.g., 'make it brighter', 'add more trees', 'change the character pose')"
                             className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none min-h-[60px]"
                             autoFocus
-                            disabled={showSpinner}
+                            disabled={isGenerating}
                           />
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => handleRegenerateAsset(asset)}
-                                  disabled={!regenerateEditPrompt.trim() || showSpinner || assets.some((a) => a.isPending)}
-                                  className={`flex-1 px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${
-                                    !regenerateEditPrompt.trim() || showSpinner || assets.some((a) => a.isPending)
-                                      ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                                      : "bg-blue-600 hover:bg-blue-500 text-white"
-                                  }`}
-                                >
-                                  {showSpinner ? (
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      <div className="w-2.5 h-2.5 border border-white/30 border-t-white rounded-full animate-spin" />
-                                      <span>Regenerating...</span>
-                                    </div>
-                                  ) : (
-                                    "Regenerate"
-                                  )}
-                                </button>
+                          {!regenerateEditPrompt.trim() && !isGenerating && (
+                            <p className="text-[7px] text-slate-500 uppercase tracking-widest">
+                              Enter a description above to enable generation
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2">
                             <button
-                              onClick={() => {
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (regenerateEditPrompt.trim()) {
+                                  handleRegenerateAsset(asset);
+                                }
+                              }}
+                              disabled={!regenerateEditPrompt.trim() || isGenerating || assets.some((a) => a.isPending)}
+                              className={`flex-1 px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${
+                                !regenerateEditPrompt.trim() || isGenerating || assets.some((a) => a.isPending)
+                                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                  : "bg-blue-600 hover:bg-blue-500 text-white"
+                              }`}
+                            >
+                              {isGenerating ? (
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <div className="w-2.5 h-2.5 border border-white/30 border-t-white rounded-full animate-spin" />
+                                  <span>Regenerating...</span>
+                                </div>
+                              ) : (
+                                "Generate"
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
                                 setRegeneratingAssetId(null);
                                 setRegenerateEditPrompt("");
-                                setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, isPending: false } : a));
                               }}
-                              disabled={showSpinner}
+                              disabled={isGenerating}
                               className={`px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${
-                                showSpinner
+                                isGenerating
                                   ? "bg-slate-800 text-slate-500 cursor-not-allowed"
                                   : "bg-slate-700 hover:bg-slate-600 text-white"
                               }`}
@@ -1530,34 +1626,56 @@ const App: React.FC = () => {
                           </div>
                         </div>
                       ) : !showSpinner && (
-                        <button
-                          onClick={() => {
-                            // Prevent clicking if any regeneration is in progress
-                            const isAnyRegenerating = assets.some((a) => a.isPending);
-                            if (isAnyRegenerating) return;
-                            
-                            // Just open the textarea for input - don't start regeneration yet
-                            // If another asset has the textarea open, close it first
-                            if (regeneratingAssetId !== null && regeneratingAssetId !== asset.id) {
+                        <div className="flex items-center gap-2">
+                          {/* Edit button - opens input for custom changes */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // Prevent clicking if any regeneration is in progress
+                              const isAnyRegenerating = assets.some((a) => a.isPending);
+                              if (isAnyRegenerating) return;
+                              
+                              // Just open the textarea for input - don't start regeneration yet
                               setRegeneratingAssetId(asset.id);
                               setRegenerateEditPrompt("");
-                            } else {
-                              setRegeneratingAssetId(asset.id);
-                              setRegenerateEditPrompt("");
-                            }
-                          }}
-                          disabled={assets.some((a) => a.isPending)}
-                          className={`w-full px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${
-                            assets.some((a) => a.isPending)
-                              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                              : "bg-emerald-600 hover:bg-emerald-500 text-white"
-                          }`}
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          Regenerate
-                        </button>
+                            }}
+                            disabled={assets.some((a) => a.isPending)}
+                            className={`flex-1 px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${
+                              assets.some((a) => a.isPending)
+                                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                            }`}
+                            title="Edit with custom instructions"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Edit
+                          </button>
+                          {/* Refresh button - regenerates with original prompt only */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleQuickRegenerate(asset);
+                            }}
+                            disabled={assets.some((a) => a.isPending)}
+                            className={`px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${
+                              assets.some((a) => a.isPending)
+                                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-blue-600 hover:bg-blue-500 text-white"
+                            }`}
+                            title="Regenerate with original prompt"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Refresh
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1566,6 +1684,61 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Minimized Asset Gallery - Floating button in bottom-right */}
+      {showAssetGallery && isGalleryMinimized && (
+        <div 
+          className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-10 zoom-in-90 duration-300"
+        >
+          <button
+            onClick={() => setIsGalleryMinimized(false)}
+            className="group relative glass-panel rounded-2xl p-4 border border-white/10 hover:border-amber-500/50 transition-all shadow-2xl shadow-black/50 hover:shadow-amber-500/10 hover:scale-105 active:scale-95"
+          >
+            <div className="flex items-center gap-3">
+              {/* Thumbnail preview of latest asset */}
+              {assets.length > 0 && (
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-900 border border-white/10">
+                  <img 
+                    src={assets[0].url} 
+                    alt="Latest" 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+              <div className="flex flex-col items-start">
+                <span className="text-[9px] font-black text-white uppercase tracking-widest">
+                  Asset Gallery
+                </span>
+                <span className="text-[8px] text-slate-400">
+                  {assets.length} {assets.length === 1 ? 'asset' : 'assets'}
+                  {assets.some(a => a.isPending) && (
+                    <span className="ml-2 text-blue-400 animate-pulse">• Generating...</span>
+                  )}
+                </span>
+              </div>
+              {/* Expand icon */}
+              <div className="ml-2 p-1.5 rounded-lg bg-slate-800/50 group-hover:bg-amber-500/20 transition-colors">
+                <svg className="w-4 h-4 text-slate-400 group-hover:text-amber-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              </div>
+            </div>
+            {/* Close button on minimized view */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAssetGallery(false);
+                setIsGalleryMinimized(false);
+              }}
+              className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-slate-800 border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 flex items-center justify-center transition-all"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </button>
         </div>
       )}
     </div>

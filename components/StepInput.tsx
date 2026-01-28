@@ -33,17 +33,19 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
   const getTagStyles = () => {
     switch(step.type) {
       case 'cover': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-      case 'first': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+      case 'title': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
       case 'last': return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
-      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20'; // first & middle are regular spreads
     }
   };
 
   const getLabel = () => {
     if (step.type === 'cover') return 'Book Cover';
-    if (step.type === 'first') return 'Intro Page';
+    if (step.type === 'title') return 'Book Title';
     if (step.type === 'last') return 'Closing Page';
-    return `Spread ${index - 1}`;
+    // For first and middle types, calculate spread number (cover=0, title=1, first=2, so first is Spread 1)
+    if (step.type === 'first') return 'Spread 1';
+    return `Spread ${index - 1}`; // middle spreads start from 2
   };
 
   return (
@@ -80,15 +82,6 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
               </div>
             )}
             
-            {step.type === 'cover' && (
-              <button 
-                onClick={() => onUpdate(step.id, { showText: !step.showText })}
-                className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border transition-all ${step.showText ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
-              >
-                {step.showText ? 'Text On' : 'Text Off'}
-              </button>
-            )}
-
             {step.type === 'middle' && onDelete && (
               <button onClick={handleDeleteClick} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -97,8 +90,9 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
           </div>
         </div>
 
-        {(step.type === 'cover' || step.type === 'first' || step.type === 'last') && (
-          <div className={`grid grid-cols-2 gap-2 mb-3 transition-opacity ${step.type === 'cover' && !step.showText ? 'opacity-20 pointer-events-none' : ''}`}>
+        {/* Title and name inputs only on Book Title spread */}
+        {step.type === 'title' && (
+          <div className="grid grid-cols-2 gap-2 mb-3">
             <div className="relative">
               <input 
                 value={step.bookTitle || ''} 
@@ -106,14 +100,15 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
                 placeholder="Story Title"
                 className="w-full bg-slate-900/50 border border-white/5 rounded-lg px-2 py-1.5 text-[10px] text-white focus:border-blue-500/50 outline-none"
               />
-              {step.type === 'cover' && onGenerateTitle && (
+              {onGenerateTitle && (
                 <button 
                   onClick={() => onGenerateTitle(step.id)} 
                   disabled={isSuggestingTitle}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-amber-500/50 hover:text-amber-500 disabled:opacity-50"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-purple-500/50 hover:text-purple-500 disabled:opacity-50"
+                  title="Generate title from story"
                 >
                   {isSuggestingTitle ? (
-                    <div className="w-3 h-3 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+                    <div className="w-3 h-3 border border-purple-500/30 border-t-purple-500 rounded-full animate-spin" />
                   ) : (
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a1 1 0 11-2 0zM13.657 15.657a1 1 0 001.414-1.414l-.707-.707a1 1 0 10-1.414 1.414l.707.707zM16 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1z" /></svg>
                   )}
@@ -136,7 +131,7 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
             placeholder="Enter visual description..."
             className="flex-1 bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
           />
-          {onGenerate && step.prompt.trim() && (
+          {onGenerate && (step.prompt.trim() || step.type === 'title') && (
             <button
               onClick={onGenerate}
               disabled={disabled || step.status === "generating"}

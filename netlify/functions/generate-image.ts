@@ -45,6 +45,7 @@ export const handler: Handler = async (event, context) => {
       imageSize,
       previousImageBase64,
       characterRefBase64,
+      referenceImageBase64, // For regeneration - maintains same composition
     } = JSON.parse(event.body || "{}");
 
     if (!prompt) {
@@ -60,6 +61,14 @@ export const handler: Handler = async (event, context) => {
     const ai = new GoogleGenAI({ apiKey });
     const parts: any[] = [];
 
+    // Add reference image for regeneration (maintains composition with edits)
+    // This takes priority over previousImageBase64 for regeneration scenarios
+    if (referenceImageBase64) {
+      const refData = referenceImageBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
+      parts.push({ inlineData: { data: refData, mimeType: "image/png" } });
+      // The prompt already contains regeneration instructions
+    }
+
     // Add character reference if provided
     if (characterRefBase64) {
       const charData = characterRefBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
@@ -67,8 +76,8 @@ export const handler: Handler = async (event, context) => {
       parts.push({ text: "PROTAGONIST REFERENCE: This is the hero character appearance." });
     }
 
-    // Add previous image for continuity if provided
-    if (previousImageBase64) {
+    // Add previous image for continuity if provided (only if not regenerating)
+    if (previousImageBase64 && !referenceImageBase64) {
       const prevData = previousImageBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
       parts.push({ inlineData: { data: prevData, mimeType: "image/png" } });
       parts.push({ text: "VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame." });

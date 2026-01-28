@@ -272,7 +272,7 @@ export default function BookGenerator({
               Generate Story (LT)
             </button>
           </div>
-          <textarea className={textArea} value={outputs.storyLt || ""} readOnly placeholder="Generate Story (LT)..." />
+          <textarea className={textArea} value={outputs.storyLt || ""} onChange={(e) => setOutputs((p) => ({ ...p, storyLt: e.target.value }))} placeholder="Generate Story (LT)..." />
         </div>
 
         <div>
@@ -310,7 +310,7 @@ export default function BookGenerator({
             </div>
           </div>
 
-          <textarea className={textArea} value={outputs.titlesLt || ""} readOnly placeholder="Generate Titles (LT)..." />
+          <textarea className={textArea} value={outputs.titlesLt || ""} onChange={(e) => setOutputs((p) => ({ ...p, titlesLt: e.target.value }))} placeholder="Generate Titles (LT)..." />
 
           {/* Title selector */}
           {outputs.titlesLt && titlesList.length > 0 && (
@@ -357,7 +357,7 @@ export default function BookGenerator({
               Character Anchor (EN)
             </button>
           </div>
-          <textarea className={textArea} value={outputs.characterAnchorEn || ""} readOnly placeholder="Character Anchor..." />
+          <textarea className={textArea} value={outputs.characterAnchorEn || ""} onChange={(e) => setOutputs((p) => ({ ...p, characterAnchorEn: e.target.value }))} placeholder="Character Anchor..." />
         </div>
 
         <div>
@@ -383,7 +383,7 @@ export default function BookGenerator({
               Spread Prompts (EN)
             </button>
           </div>
-          <textarea className={textArea} value={outputs.spreadPromptsEn || ""} readOnly placeholder="Spread prompts..." />
+          <textarea className={textArea} value={outputs.spreadPromptsEn || ""} onChange={(e) => setOutputs((p) => ({ ...p, spreadPromptsEn: e.target.value }))} placeholder="Spread prompts..." />
         </div>
 
         <div>
@@ -416,7 +416,7 @@ export default function BookGenerator({
               Cover Prompt (EN)
             </button>
           </div>
-          <textarea className={textArea} value={outputs.coverPromptEn || ""} readOnly placeholder="Cover prompt..." />
+          <textarea className={textArea} value={outputs.coverPromptEn || ""} onChange={(e) => setOutputs((p) => ({ ...p, coverPromptEn: e.target.value }))} placeholder="Cover prompt..." />
         </div>
 
         <div>
@@ -443,7 +443,7 @@ export default function BookGenerator({
               3D Title Prompt (EN)
             </button>
           </div>
-          <textarea className={textArea} value={outputs.titleLogoPromptEn || ""} readOnly placeholder="3D typography prompt..." />
+          <textarea className={textArea} value={outputs.titleLogoPromptEn || ""} onChange={(e) => setOutputs((p) => ({ ...p, titleLogoPromptEn: e.target.value }))} placeholder="3D typography prompt..." />
         </div>
       </div>
     </div>

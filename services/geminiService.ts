@@ -1,7 +1,7 @@
 // src/services/geminiService.ts
 import type { AspectRatio, ImageSize } from "../types";
 
-type StepType = "cover" | "first" | "middle" | "last";
+type StepType = "cover" | "first" | "middle" | "last" | "title";
 type TextSide = "left" | "right" | "none";
 type CoverPart = "background" | "title" | "cast";
 
@@ -103,7 +103,8 @@ export class GeminiService {
       demographicExclusion?: boolean; // ignored if present
     },
     previousImageBase64?: string,
-    characterRefBase64?: string
+    characterRefBase64?: string,
+    referenceImageBase64?: string // For regeneration - maintains same composition with edits
   ): Promise<string> {
     const ruleContext =
       globalRules.length > 0 ? `Visual Style Requirements: ${globalRules.join(", ")}. ` : "";
@@ -155,13 +156,18 @@ STRICT: NO ARTWORK, NO SCENERY, NO BORDERS. ONLY THE STYLIZED TEXT ON BLACK.`;
         // fallback (if coverPart missing)
         finalPromptText = `${ruleContext} ${compositionContext} COVER: ${step.prompt}. Pure full-bleed cinematic artwork with no borders.`;
       }
-    } else if (step.type === "first") {
-      compositionContext = `COMPOSITION: Opening Story Logo.
-SUBJECT: "${cleanTitle}".
-THEMATIC STYLE: Use highly stylized cinematic logo design matching: "${styleDescription}". Text should be richly textured and colored.
+    } else if (step.type === "title") {
+      // Book Title Page: use 3D Logo Prompt from Book Generator when transferred, else fallback
+      if (step.prompt && step.prompt.trim()) {
+        finalPromptText = `${ruleContext}COMPOSITION: Book Title Page. ${step.prompt.trim()} BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000). STRICT: NO SCENERY, NO BORDERS. ONLY TYPOGRAPHY ON BLACK.`;
+      } else {
+        compositionContext = `COMPOSITION: Book Title Page.
+SUBJECT: "${cleanTitle}" in massive, epic stylized typography.
+THEMATIC STYLE: Use highly stylized cinematic title design matching: "${styleDescription}". Text should be richly textured, 3D, and visually stunning.
 BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
-STRICT: NO SCENERY, NO BORDERS. ONLY THE STYLIZED LOGO ON BLACK.`;
-      finalPromptText = compositionContext;
+STRICT: NO SCENERY, NO BORDERS. ONLY THE STYLIZED TITLE ON BLACK.`;
+        finalPromptText = compositionContext;
+      }
     } else if (step.type === "last") {
       compositionContext = `COMPOSITION: Ending Card.
 SUBJECT: "PABAIGA" in stylized cinematic typography matching: "${styleDescription}".
@@ -177,17 +183,24 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
     }
 
     const isTypographyLayer =
-      step.type === "first" ||
       step.type === "last" ||
+      step.type === "title" ||
       step.coverPart === "title" ||
       step.coverPart === "cast";
 
     // Add image context to prompt if we have reference images
     let enhancedPrompt = finalPromptText;
+    
+    // If regenerating with reference image, maintain composition but apply edits
+    if (referenceImageBase64 && !isTypographyLayer) {
+      enhancedPrompt = `REGENERATION MODE: This is the original image. Maintain the exact same composition, camera angle, layout, and overall structure. Apply ONLY the requested changes while keeping everything else identical.\n\n${enhancedPrompt}`;
+    }
+    
     if (characterRefBase64 && !isTypographyLayer) {
       enhancedPrompt = `PROTAGONIST REFERENCE: This is the hero character appearance.\n${enhancedPrompt}`;
     }
-    if (previousImageBase64 && !isTypographyLayer && step.type !== "cover") {
+    if (previousImageBase64 && !isTypographyLayer && step.type !== "cover" && !referenceImageBase64) {
+      // Only use previousImage for continuity if not regenerating (regeneration uses referenceImage instead)
       enhancedPrompt = `VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame.\n${enhancedPrompt}`;
     }
 
@@ -201,8 +214,9 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
           prompt: enhancedPrompt,
           aspectRatio: config.aspectRatio,
           imageSize: config.imageSize,
-          previousImageBase64: previousImageBase64 && !isTypographyLayer && step.type !== "cover" ? previousImageBase64 : undefined,
+          previousImageBase64: previousImageBase64 && !isTypographyLayer && step.type !== "cover" && !referenceImageBase64 ? previousImageBase64 : undefined,
           characterRefBase64: characterRefBase64 && !isTypographyLayer ? characterRefBase64 : undefined,
+          referenceImageBase64: referenceImageBase64 && !isTypographyLayer ? referenceImageBase64 : undefined,
         }),
       });
 
