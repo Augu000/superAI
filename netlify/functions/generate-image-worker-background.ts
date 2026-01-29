@@ -68,7 +68,7 @@ export const handler: Handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "Invalid body or missing jobId" }) };
   }
 
-  connectLambda(event);
+  connectLambda(event as any);
 
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
@@ -83,7 +83,7 @@ export const handler: Handler = async (event) => {
     return { statusCode: 404, body: JSON.stringify({ error: "Job not found" }) };
   }
 
-  const job = JSON.parse(raw as string);
+  const job = JSON.parse(raw as unknown as string);
   if (job.status !== "pending" || !job.request) {
     return { statusCode: 400, body: JSON.stringify({ error: "Job not pending or missing request" }) };
   }

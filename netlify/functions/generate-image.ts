@@ -5,11 +5,12 @@ import { v4 as uuidv4 } from "uuid";
 const STORE_NAME = "image-generation-jobs";
 const CORS = { "Access-Control-Allow-Origin": "*" } as Record<string, string>;
 
-function getBaseUrl(event: { headers?: Record<string, string> }): string {
+function getBaseUrl(event: { headers?: { [key: string]: string | undefined } }): string {
   const url = process.env.URL || process.env.DEPLOY_PRIME_URL;
   if (url) return url.replace(/\/$/, "");
-  const host = event.headers?.["x-forwarded-host"] || event.headers?.host;
-  const proto = event.headers?.["x-forwarded-proto"] || "http";
+  const h = event.headers as Record<string, string> | undefined;
+  const host = h?.["x-forwarded-host"] || h?.host;
+  const proto = h?.["x-forwarded-proto"] || "http";
   if (host) return `${proto}://${host}`;
   return "http://localhost:8888";
 }
@@ -86,7 +87,7 @@ export const handler: Handler = async (event) => {
   };
 
   try {
-    connectLambda(event);
+    connectLambda(event as any);
     const store = getStore({ name: STORE_NAME, consistency: "eventual" });
     await store.set(jobId, JSON.stringify({ status: "pending", request }));
 

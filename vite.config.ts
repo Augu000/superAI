@@ -3,19 +3,21 @@ import react from '@vitejs/plugin-react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 
-export default defineConfig(async () => {
-  let netlifyPlugin: (() => unknown) | null = null;
+// Async config for dynamic Netlify plugin; cast needed for TS (UserConfigExport overload)
+export default defineConfig((async () => {
+  let netlifyPlugin: unknown = null;
   try {
     const mod = await import('@netlify/vite-plugin');
-    netlifyPlugin = (mod as { default?: () => unknown }).default ?? mod;
+    const fn = (mod as { default?: unknown }).default ?? mod;
+    netlifyPlugin = typeof fn === 'function' ? (fn as () => unknown)() : fn;
   } catch {
-    // @netlify/vite-plugin missing or broken (e.g. no dist/main.js); Netlify Dev will still proxy + run functions
+    // @netlify/vite-plugin missing or broken; Netlify Dev will still proxy + run functions
   }
 
   return {
     plugins: [
       react({ jsxRuntime: 'automatic' }),
-      ...(netlifyPlugin ? [netlifyPlugin()] : []),
+      ...(netlifyPlugin != null ? [netlifyPlugin] : []),
       {
         name: 'netlify-redirects',
         closeBundle() {
@@ -41,4 +43,4 @@ export default defineConfig(async () => {
     },
     assetsInclude: ['**/*.html'],
   };
-});
+}) as Parameters<typeof defineConfig>[0]);

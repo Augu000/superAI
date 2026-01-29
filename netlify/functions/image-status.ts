@@ -5,7 +5,7 @@ const STORE_NAME = "image-generation-jobs";
 const CORS = { "Access-Control-Allow-Origin": "*" } as Record<string, string>;
 
 export const handler: Handler = async (event) => {
-  connectLambda(event);
+  connectLambda(event as any);
 
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -47,7 +47,7 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    const job = JSON.parse(raw as string);
+    const job = JSON.parse(raw as unknown as string);
     return {
       statusCode: 200,
       headers: { ...CORS, "Content-Type": "application/json" },
