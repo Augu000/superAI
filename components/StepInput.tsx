@@ -5,6 +5,7 @@ import { ImageStep } from '../types';
 interface StepInputProps {
   step: ImageStep;
   index: number;
+  spreadNumber?: number | null;
   onUpdate: (id: string, updates: Partial<ImageStep>) => void;
   onDelete?: (id: string) => void;
   onGenerateTitle?: (id: string) => void;
@@ -13,7 +14,7 @@ interface StepInputProps {
   isSuggestingTitle?: boolean;
 }
 
-const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, onGenerateTitle, onGenerate, disabled, isSuggestingTitle }) => {
+const StepInput: React.FC<StepInputProps> = ({ step, index, spreadNumber, onUpdate, onDelete, onGenerateTitle, onGenerate, disabled, isSuggestingTitle }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleDeleteClick = () => {
@@ -34,18 +35,16 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, onUpdate, onDelete, 
     switch(step.type) {
       case 'cover': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
       case 'title': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
-      case 'last': return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
-      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20'; // first & middle are regular spreads
+      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20'; // first, middle, last = Spread 1..N
     }
   };
 
   const getLabel = () => {
     if (step.type === 'cover') return 'Book Cover';
     if (step.type === 'title') return 'Book Title';
-    if (step.type === 'last') return 'Closing Page';
-    // For first and middle types, calculate spread number (cover=0, title=1, first=2, so first is Spread 1)
+    if (spreadNumber != null) return `Spread ${spreadNumber}`;
     if (step.type === 'first') return 'Spread 1';
-    return `Spread ${index - 1}`; // middle spreads start from 2
+    return `Spread ${index - 1}`;
   };
 
   return (

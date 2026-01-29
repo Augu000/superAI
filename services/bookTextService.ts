@@ -1,12 +1,6 @@
-// Get the base URL for Netlify Functions
-const getApiBaseUrl = () => {
-  // In production, functions are at /.netlify/functions/...
-  // In development with Netlify CLI, they're at http://localhost:8888/.netlify/functions/...
-  if (import.meta.env.DEV) {
-    return "http://localhost:8888/.netlify/functions";
-  }
-  return "/.netlify/functions";
-};
+// Use relative path so app and functions are same-origin (no CORS).
+// Run "npm run dev:netlify" and open http://localhost:8888 (not :3000).
+const getApiBaseUrl = () => "/.netlify/functions";
 
 export type Gender = "boy" | "girl" | "neutral";
 
@@ -116,11 +110,23 @@ export class BookTextService {
   }
 
   private async run(prompt: string): Promise<string> {
-    const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    const url = `${getApiBaseUrl()}/generate-text`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (msg.includes("Failed to fetch") || msg.includes("ERR_CONNECTION_REFUSED") || msg.includes("Load failed")) {
+        throw new Error(
+          "Cannot reach the API. Run: npm run dev:netlify — then open http://localhost:8888 (do not use port 3000)."
+        );
+      }
+      throw e;
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: "Unknown error" }));

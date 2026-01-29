@@ -1,7 +1,7 @@
 // src/App.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
-import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, SavedProject, RenderedAsset } from "./types";
+import type { ImageStep, GlobalRule, AspectRatio, GlobalConfig, ImageSize, SavedProject, RenderedAsset } from "./types";
 import { GeminiService } from "./services/geminiService";
 import type { BookInput, BookOutputs } from "./services/bookTextService";
 
@@ -56,11 +56,22 @@ const App: React.FC = () => {
   const [characterRef, setCharacterRef] = useState<string | null>(null);
 
   const [config, setConfig] = useState<GlobalConfig>({
-    aspectRatio: "16:9",
-    imageSize: "1K",
+    aspectRatio: "21:9",
+    imageSize: "4K",
     bleedPercent: 15,
     demographicExclusion: true,
   });
+
+  const getOutputDimensions = (): { width: number; height: number } => {
+    const sizeMap: Record<ImageSize, number> = { "1K": 1024, "2K": 2048, "4K": 4096 };
+    const size = sizeMap[config.imageSize];
+    const [w, h] = config.aspectRatio.split(":").map(Number);
+    if (w === h) return { width: size, height: size };
+    const landscape = w > h;
+    const long = size;
+    const short = Math.round((landscape ? h / w : w / h) * size);
+    return landscape ? { width: long, height: short } : { width: short, height: long };
+  };
 
   const [isProcessActive, setIsProcessActive] = useState(false);
   const isProcessActiveRef = useRef(false);
@@ -124,6 +135,19 @@ const App: React.FC = () => {
 
   const removePendingAsset = (pendingId: string) => {
     setAssets((prev) => prev.filter((a) => a.id !== pendingId));
+  };
+
+  const handleRetryStuckAsset = (asset: RenderedAsset) => {
+    if (!asset.isPending) return;
+    removePendingAsset(asset.id);
+  };
+
+  /** Spread number 1..N for first/middle/last steps; null for cover/title */
+  const getSpreadNumber = (step: ImageStep, stepList: ImageStep[]): number | null => {
+    if (step.type !== "first" && step.type !== "middle" && step.type !== "last") return null;
+    const spreadSteps = stepList.filter((s) => s.type === "first" || s.type === "middle" || s.type === "last");
+    const idx = spreadSteps.findIndex((s) => s.id === step.id);
+    return idx >= 0 ? idx + 1 : null;
   };
 
   const addSpread = () => {
@@ -308,33 +332,35 @@ const App: React.FC = () => {
       });
     }
 
-    // Parse spread prompts (EN) and assign to Spread 1 + middle spreads
-    // All spread images use Spread Prompts (EN) only – not Story (LT)
+    // Parse Spread Prompts (EN): detect all spreads and create one image-generation card per spread in the story timeline.
+    // Last spread (Spread N) gets the actual last chunk content; no image generation for it.
     if (outputs.spreadPromptsEn) {
       const spreadChunks = outputs.spreadPromptsEn
-        .split(/\n(?=Spread\s+\d+\s+\(PROMPT\)\s*:)/gi)
+        .split(/\n(?=Spread\s+\d+\s*\((?:PROMPT|SCENE)\)\s*:?\s*)/gi)
         .map((s) => s.trim())
         .filter(Boolean);
 
       const cleanPrompt = (chunk: string) =>
-        chunk.replace(/Spread\s+\d+\s*\(PROMPT\)\s*:?\s*/gi, "").trim();
+        chunk.replace(/Spread\s+\d+\s*\((?:PROMPT|SCENE)\)\s*:?\s*/gi, "").trim();
 
-      // Spread 1 (PROMPT) → first step; Spread 2+ (PROMPT) → middle steps
-      const spread1Prompt = spreadChunks.length > 0 ? cleanPrompt(spreadChunks[0]) : "";
-      const spread2PlusChunks = spreadChunks.slice(1);
+      const N = spreadChunks.length;
+      const spread1Prompt = N > 0 ? cleanPrompt(spreadChunks[0]) : "";
+      const middleChunks = N > 2 ? spreadChunks.slice(1, -1) : [];
+      const lastChunkPrompt = N > 1 ? cleanPrompt(spreadChunks[N - 1]) : "";
 
       setSteps((prevSteps) => {
         const cover = prevSteps.find((s) => s.type === "cover")!;
         const title = prevSteps.find((s) => s.type === "title");
-        const first = prevSteps.find((s) => s.type === "first")!;
-        const last = prevSteps.find((s) => s.type === "last")!;
 
-        const firstUpdated = {
-          ...first,
-          prompt: spread1Prompt || first.prompt,
+        const firstUpdated: ImageStep = {
+          id: uuidv4(),
+          type: "first",
+          prompt: spread1Prompt,
+          status: "idle",
+          textSide: "left",
         };
 
-        const newMiddleSteps: ImageStep[] = spread2PlusChunks.map((chunk) => ({
+        const newMiddleSteps: ImageStep[] = middleChunks.map((chunk) => ({
           id: uuidv4(),
           type: "middle" as const,
           prompt: cleanPrompt(chunk) || "",
@@ -342,30 +368,32 @@ const App: React.FC = () => {
           textSide: "none" as const,
         }));
 
+        const spreadSteps: ImageStep[] =
+          N >= 2
+            ? [
+                firstUpdated,
+                ...newMiddleSteps,
+                {
+                  id: uuidv4(),
+                  type: "last" as const,
+                  prompt: lastChunkPrompt,
+                  status: "idle" as const,
+                  textSide: "none" as const,
+                  bookTitle: "",
+                  cast: "",
+                },
+              ]
+            : [firstUpdated];
+
         if (!title) {
-          return [cover, firstUpdated, ...newMiddleSteps, last];
+          return [cover, ...spreadSteps];
         }
         const titleUpdated = {
           ...title,
           prompt: outputs.titleLogoPromptEn || title.prompt,
           bookTitle: selectedTitle || title.bookTitle,
         };
-        return [cover, titleUpdated, firstUpdated, ...newMiddleSteps, last];
-      });
-    }
-
-    // Update last/closing page
-    if (lastStep) {
-      // Extract closing text from storyLt if available
-      let closingPrompt = "Closing Card";
-      if (outputs.storyLt) {
-        const closingMatch = outputs.storyLt.match(/Spread\s+14\s*\(TEXT\)\s*:?\s*(.+?)$/is);
-        if (closingMatch) {
-          closingPrompt = `Closing: ${closingMatch[1].trim()}`;
-        }
-      }
-      updateStep(lastStep.id, {
-        prompt: closingPrompt,
+        return [cover, titleUpdated, ...spreadSteps];
       });
     }
 
@@ -398,9 +426,9 @@ const App: React.FC = () => {
     const blocks: string[] = [];
     blocks.push(`COVER: ${coverPrompt}`);
 
-    // break on each "Spread X (PROMPT):"
+    // break on each "Spread N (PROMPT):" or "Spread N (SCENE):"
     const spreadChunks = scenePrompts
-      .split(/\n(?=Spread\s+\d+\s+\(PROMPT\)\s*:)/g)
+      .split(/\n(?=Spread\s+\d+\s*\((?:PROMPT|SCENE)\)\s*:?\s*)/gi)
       .map((s) => s.trim())
       .filter(Boolean);
 
@@ -494,8 +522,11 @@ const App: React.FC = () => {
     }
   };
 
+  // All spreads (including last / Spread N) are in the render queue and have generate buttons
   const activeQueueSteps = steps
-    .map((s, i) => (s.prompt.trim() || s.type === "cover" || s.type === "title" || s.type === "last" ? i : -1))
+    .map((s, i) =>
+      s.prompt.trim() || s.type === "cover" || s.type === "title" ? i : -1
+    )
     .filter((i) => i !== -1);
 
   const currentActiveStep = currentQueueIndex >= 0 ? steps[activeQueueSteps[currentQueueIndex]] : null;
@@ -623,7 +654,6 @@ const App: React.FC = () => {
     if (stepIndex === -1) return;
     
     const step = steps[stepIndex];
-    // Title steps can generate without a prompt (they use bookTitle)
     if (!step || (!step.prompt.trim() && step.type !== "title")) return;
     
     // Update step status to generating
@@ -662,7 +692,12 @@ const App: React.FC = () => {
         replacePendingAsset(pendingId, imageUrl, step.bookTitle || "Book Title");
       } else {
         setGenerationPhase("scene");
-        const label = step.type === "last" ? "Ending Card" : step.type === "first" ? "Spread 1 Artwork" : `Spread ${stepIndex - 1} Artwork`;
+        const label =
+          step.type === "last"
+            ? "Last Spread"
+            : step.type === "first"
+              ? "Spread 1 Artwork"
+              : `Spread ${stepIndex - 1} Artwork`;
         const pendingId = addPendingAsset(label, step.id, step.type);
         const imageUrl = await gemini.generateStepImage(
           step,
@@ -683,15 +718,37 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadImage = (url: string, label: string) => {
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${label.replace(/\s+/g, "_")}_${Date.now()}.png`;
-    link.click();
+  const downloadImage = async (url: string, label: string) => {
+    const filename = `${label.replace(/\s+/g, "_")}_${Date.now()}.png`;
+    if (url.startsWith("data:")) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      return;
+    }
+    try {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error("Fetch failed");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+    } catch {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
+    }
   };
 
   const downloadAll = () => {
-    assets.forEach((asset, idx) => {
+    assets.filter((a) => !a.isPending && a.url).forEach((asset, idx) => {
       setTimeout(() => downloadImage(asset.url, asset.label), idx * 300);
     });
   };
@@ -975,7 +1032,7 @@ const App: React.FC = () => {
 
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-1">
-                {(["16:9", "4:3", "1:1"] as AspectRatio[]).map((ratio) => (
+                {(["16:9", "21:9", "4:3", "1:1"] as AspectRatio[]).map((ratio) => (
                   <button
                     key={ratio}
                     onClick={() => setConfig((c) => ({ ...c, aspectRatio: ratio }))}
@@ -988,6 +1045,28 @@ const App: React.FC = () => {
                     {ratio}
                   </button>
                 ))}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {(["1K", "2K", "4K"] as const).map((sz) => (
+                  <button
+                    key={sz}
+                    onClick={() => setConfig((c) => ({ ...c, imageSize: sz }))}
+                    className={`py-1 px-2 text-[8px] font-black rounded border transition-all ${
+                      config.imageSize === sz
+                        ? "bg-slate-600 border-slate-500 text-white"
+                        : "bg-slate-900/50 border-white/5 text-slate-500 hover:border-white/20"
+                    }`}
+                  >
+                    {sz}
+                  </button>
+                ))}
+                <span className="py-1.5 px-2.5 rounded bg-blue-600 text-white text-[8px] font-black tabular-nums">
+                  {(() => {
+                    const { width, height } = getOutputDimensions();
+                    return `${width}×${height}`;
+                  })()}
+                </span>
               </div>
 
               <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-white/5 group cursor-pointer" onClick={() => setConfig(c => ({...c, demographicExclusion: !c.demographicExclusion}))}>
@@ -1105,10 +1184,11 @@ const App: React.FC = () => {
                 key={step.id}
                 index={idx}
                 step={step}
+                spreadNumber={getSpreadNumber(step, steps)}
                 onUpdate={updateStep}
                 onDelete={step.type === "middle" ? deleteStep : undefined}
                 onGenerateTitle={step.type === "title" ? handleGenerateTitle : undefined}
-                onGenerate={(step.prompt.trim() || step.type === "title") && !isProcessActive ? () => handleGenerateSingleStep(step.id) : undefined}
+                onGenerate={((step.prompt.trim() || step.type === "title") && !isProcessActive) ? () => handleGenerateSingleStep(step.id) : undefined}
                 disabled={isProcessActive && !isPaused}
                 isSuggestingTitle={step.type === "title" && isSuggestingTitle}
               />
@@ -1333,7 +1413,10 @@ const App: React.FC = () => {
               {assets.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setShowAssetGallery(true)}
+                    onClick={() => {
+                      setShowAssetGallery(true);
+                      setIsGalleryMinimized(false);
+                    }}
                     className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-[7px] font-black rounded uppercase tracking-widest transition-all flex items-center gap-1.5"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1386,9 +1469,21 @@ const App: React.FC = () => {
                         {asset.isPending ? "Generating..." : new Date(asset.timestamp).toLocaleTimeString()}
                       </p>
                     </div>
-                    {!asset.isPending && (
+                    {asset.isPending ? (
                       <button
-                        onClick={() => downloadImage(asset.url, asset.label)}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleRetryStuckAsset(asset); }}
+                        className="w-7 h-7 rounded bg-amber-600 hover:bg-amber-500 text-white flex items-center justify-center transition-all"
+                        title="Retry (remove stuck)"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); downloadImage(asset.url, asset.label); }}
                         className="w-7 h-7 rounded bg-slate-800 hover:bg-blue-600 text-slate-400 hover:text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
                       >
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1542,6 +1637,13 @@ const App: React.FC = () => {
                             <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">
                               Regenerating...
                             </p>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRetryStuckAsset(asset); }}
+                              className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-black uppercase"
+                            >
+                              Retry
+                            </button>
                           </div>
                         </div>
                       ) : (

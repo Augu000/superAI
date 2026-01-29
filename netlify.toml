@@ -11,11 +11,16 @@
 [functions]
   node_bundler = "esbuild"
   included_files = ["netlify/functions/**"]
-  
-[functions.generate-text]
+
+[functions."generate-text"]
   timeout = 60
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Sync endpoint: enqueues job and returns 202 { jobId }; client polls image-status
+[functions."generate-image"]
+  timeout = 10
+
+# Background worker runs Gemini (up to 15 min); result stored in Blobs, read via image-status
+# [functions."generate-image-worker-background"] is auto-detected by -background suffix
+
+# SPA redirect is in dist/_redirects (generated at build time) so Netlify Dev
+# does not rewrite /index.tsx and /@vite/* to index.html (which caused empty MIME type).

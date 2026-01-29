@@ -30,13 +30,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/14x7WDxFyWagB0Y9As3BUn2
 
 4. Run the app with Netlify Dev (this runs both the frontend and functions):
    ```bash
-   netlify dev
+   npm run dev:netlify
    ```
+   **Important:** Open **http://localhost:8888** in your browser (not port 3000). The app and API use the same origin to avoid CORS errors.
    
-   Or run just the frontend (functions won't work):
-   ```bash
-   npm run dev
-   ```
+   If you run only `npm run dev`, the Book Generator and image generation will not work (no API). Use `npm run dev:netlify` and open port 8888.
+
+   **Troubleshooting:** If you see "Cannot find package '@netlify/vite-plugin'" or MIME/script errors, run `npm install` again. The `dev:netlify` script clears any built SPA redirect in dev so JS modules are served correctly. For **404**, **500**, **"Task timed out after 30.00 seconds"**, or **"functions.timeout must be an object"**, see [Understand this error](docs/UNDERSTAND-THIS-ERROR.md). If image generation keeps timing out at 30s, run `npm install -D netlify-cli@latest` and restart `npm run dev:netlify`.
 
 ## Deploy to Netlify
 

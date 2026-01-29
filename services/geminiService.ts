@@ -5,15 +5,24 @@ type StepType = "cover" | "first" | "middle" | "last" | "title";
 type TextSide = "left" | "right" | "none";
 type CoverPart = "background" | "title" | "cast";
 
-// Get the base URL for Netlify Functions
-const getApiBaseUrl = () => {
-  // In production, functions are at /api/...
-  // In development with Netlify CLI, they're at http://localhost:8888/.netlify/functions/...
-  if (import.meta.env.DEV) {
-    return "http://localhost:8888/.netlify/functions";
+// Use relative path so app and functions are same-origin (no CORS).
+// Run "npm run dev:netlify" and open http://localhost:8888 (not :3000).
+const getApiBaseUrl = () => "/.netlify/functions";
+
+const NETLIFY_DEV_MSG =
+  "Cannot reach the API. Run: npm run dev:netlify — then open http://localhost:8888 (do not use port 3000).";
+
+async function apiFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (msg.includes("Failed to fetch") || msg.includes("ERR_CONNECTION_REFUSED") || msg.includes("Load failed")) {
+      throw new Error(NETLIFY_DEV_MSG);
+    }
+    throw e;
   }
-  return "/.netlify/functions";
-};
+}
 
 export class GeminiService {
   constructor() {
@@ -25,7 +34,7 @@ export class GeminiService {
    * Returns plain text.
    */
   async generateText(prompt: string): Promise<string> {
-    const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
+    const response = await apiFetch(`${getApiBaseUrl()}/generate-text`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -43,7 +52,7 @@ export class GeminiService {
   }
 
   async analyzeStory(prompts: string[]): Promise<{ title: string; visualStyle: string }> {
-    const response = await fetch(`${getApiBaseUrl()}/analyze-story`, {
+    const response = await apiFetch(`${getApiBaseUrl()}/analyze-story`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -65,7 +74,7 @@ export class GeminiService {
 
   async generateCastName(prompts: string[]): Promise<string> {
     const combined = prompts.filter((p: string) => p.trim().length > 0).join("\n");
-    const response = await fetch(`${getApiBaseUrl()}/generate-text`, {
+    const response = await apiFetch(`${getApiBaseUrl()}/generate-text`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -205,7 +214,7 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
     }
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/generate-image`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/generate-image`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -220,18 +229,56 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(error.error || `HTTP ${response.status}`);
+      const text = await response.text();
+      if (response.status !== 202) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const json = JSON.parse(text);
+          if (json?.error) errorMessage = json.error;
+        } catch {
+          if (text) errorMessage = text.slice(0, 200);
+        }
+        throw new Error(errorMessage);
       }
 
-      const data = await response.json();
-      if (!data.image) {
-        throw new Error("No image data found.");
+      let data: { jobId?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Invalid response from generate-image");
+      }
+      const jobId = data.jobId;
+      if (!jobId) {
+        throw new Error("No jobId in response");
       }
 
-      return data.image;
-    } catch (error: any) {
+      const pollIntervalMs = 2000;
+      const maxWaitMs = 5 * 60 * 1000;
+      const started = Date.now();
+
+      for (;;) {
+        const statusRes = await apiFetch(
+          `${getApiBaseUrl()}/image-status?jobId=${encodeURIComponent(jobId)}`,
+          { method: "GET" }
+        );
+        const statusText = await statusRes.text();
+        if (!statusRes.ok) {
+          throw new Error(statusRes.status === 404 ? "Job not found" : statusText || `HTTP ${statusRes.status}`);
+        }
+        const statusData = JSON.parse(statusText) as { status: string; image?: string; error?: string };
+        if (statusData.status === "completed") {
+          if (statusData.image) return statusData.image;
+          throw new Error("No image data found.");
+        }
+        if (statusData.status === "error") {
+          throw new Error(statusData.error || "Image generation failed");
+        }
+        if (Date.now() - started >= maxWaitMs) {
+          throw new Error("Image generation timed out");
+        }
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+      }
+    } catch (error: unknown) {
       console.error("Gemini Error:", error);
       throw error;
     }
