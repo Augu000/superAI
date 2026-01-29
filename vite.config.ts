@@ -41,6 +41,5 @@ export default defineConfig((async () => {
       exclude: ['index.html'],
       include: ['react', 'react-dom'],
     },
-    assetsInclude: ['**/*.html'],
   };
 }) as Parameters<typeof defineConfig>[0]);
