@@ -9,6 +9,15 @@ import StepInput from "./components/StepInput";
 import RuleInput from "./components/RuleInput";
 import BookGenerator from "./components/BookGenerator";
 
+/** Official Gemini 3 Pro Image Preview resolutions (w×h) per aspect ratio and size. */
+const GEMINI_3_PRO_IMAGE_RESOLUTIONS: Record<AspectRatio, Record<ImageSize, [number, number]>> = {
+  "1:1":  { "1K": [1024, 1024],   "2K": [2048, 2048],   "4K": [4096, 4096] },
+  "3:4":  { "1K": [896, 1200],    "2K": [1792, 2400],   "4K": [3584, 4800] },
+  "4:3":  { "1K": [1200, 896],    "2K": [2400, 1792],   "4K": [4800, 3584] },
+  "9:16": { "1K": [768, 1376],    "2K": [1536, 2752],   "4K": [3072, 5504] },
+  "16:9": { "1K": [1376, 768],    "2K": [2752, 1536],   "4K": [5504, 3072] },
+  "21:9": { "1K": [1584, 672],    "2K": [3168, 1344],   "4K": [6336, 2688] },
+};
 
 const App: React.FC = () => {
   const createInitialSteps = (): ImageStep[] => {
@@ -63,14 +72,8 @@ const App: React.FC = () => {
   });
 
   const getOutputDimensions = (): { width: number; height: number } => {
-    const sizeMap: Record<ImageSize, number> = { "1K": 1024, "2K": 2048, "4K": 4096 };
-    const size = sizeMap[config.imageSize];
-    const [w, h] = config.aspectRatio.split(":").map(Number);
-    if (w === h) return { width: size, height: size };
-    const landscape = w > h;
-    const long = size;
-    const short = Math.round((landscape ? h / w : w / h) * size);
-    return landscape ? { width: long, height: short } : { width: short, height: long };
+    const [width, height] = GEMINI_3_PRO_IMAGE_RESOLUTIONS[config.aspectRatio][config.imageSize];
+    return { width, height };
   };
 
   const [isProcessActive, setIsProcessActive] = useState(false);
@@ -1029,6 +1032,7 @@ const App: React.FC = () => {
               <div className="w-1 h-1 rounded-full bg-blue-500" />
               Global Constants
             </h2>
+            <p className="text-[7px] text-slate-500 -mt-2">Gemini 3 Pro Image Preview</p>
 
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-1">

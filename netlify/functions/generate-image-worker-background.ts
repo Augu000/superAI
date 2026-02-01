@@ -1,6 +1,5 @@
 import type { Handler } from "@netlify/functions";
 import { connectLambda, getStore } from "@netlify/blobs";
-import { GoogleGenAI } from "@google/genai";
 
 const IMAGE_MODEL = "gemini-3-pro-image-preview";
 const STORE_NAME = "image-generation-jobs";
@@ -13,45 +12,45 @@ async function runGeminiImageGeneration(request: {
   characterRefBase64?: string;
   referenceImageBase64?: string;
 }, apiKey: string): Promise<string> {
-  const ai = new GoogleGenAI({ apiKey });
-  const parts: { inlineData?: { data: string; mimeType: string }; text?: string }[] = [];
-
+  const parts: { inline_data?: { data: string; mime_type: string }; text?: string }[] = [];
   const { prompt, aspectRatio, imageSize, previousImageBase64, characterRefBase64, referenceImageBase64 } = request;
 
   if (referenceImageBase64) {
     const refData = referenceImageBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
-    parts.push({ inlineData: { data: refData, mimeType: "image/png" } });
+    parts.push({ inline_data: { data: refData, mime_type: "image/png" } });
   }
   if (characterRefBase64) {
     const charData = characterRefBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
-    parts.push({ inlineData: { data: charData, mimeType: "image/png" } });
+    parts.push({ inline_data: { data: charData, mime_type: "image/png" } });
     parts.push({ text: "PROTAGONIST REFERENCE: This is the hero character appearance." });
   }
   if (previousImageBase64 && !referenceImageBase64) {
     const prevData = previousImageBase64.replace(/^data:image\/(png|jpeg|webp);base64,/, "");
-    parts.push({ inlineData: { data: prevData, mimeType: "image/png" } });
+    parts.push({ inline_data: { data: prevData, mime_type: "image/png" } });
     parts.push({ text: "VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame." });
   }
   parts.push({ text: prompt });
 
-  const response = await ai.models.generateContent({
-    model: IMAGE_MODEL,
-    contents: { parts },
-    config: {
-      imageConfig: {
-        aspectRatio: aspectRatio || "16:9",
-        imageSize: imageSize || "1K",
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        imageConfig: { aspectRatio: aspectRatio || "16:9", imageSize: imageSize || "1K" },
       },
-    },
+    }),
   });
-
-  if (!response.candidates?.[0]?.content?.parts) {
-    throw new Error("Generation failed.");
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || `HTTP ${res.status}`);
   }
-  for (const part of response.candidates[0].content.parts) {
-    if (part.inlineData) {
-      return `data:image/png;base64,${part.inlineData.data}`;
-    }
+  const data = await res.json();
+  if (!data.candidates?.[0]?.content?.parts) throw new Error("Generation failed.");
+  for (const part of data.candidates[0].content.parts) {
+    const imgData = part.inlineData?.data ?? part.inline_data?.data;
+    if (imgData) return `data:image/png;base64,${imgData}`;
   }
   throw new Error("No image data found.");
 }

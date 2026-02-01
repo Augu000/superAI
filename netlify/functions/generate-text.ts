@@ -1,5 +1,4 @@
 import { Handler } from "@netlify/functions";
-import { GoogleGenAI } from "@google/genai";
 
 const TEXT_MODEL = "gemini-3-flash-preview";
 
@@ -30,6 +29,9 @@ export const handler: Handler = async (event, context) => {
   try {
     console.log("generate-text function called");
     const apiKey = process.env.API_KEY;
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/c834aa7f-5a21-4ef4-aa2d-4f530770aaf0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-text.ts:entry',message:'API_KEY diagnostics',data:{hasApiKey:!!apiKey,length:apiKey?.length??0,startsWithAIza:apiKey?.startsWith?.('AIza')??false,first7:apiKey?.slice?.(0,7)??null,last4:apiKey?.length?apiKey.slice(-4):null,hasGEMINI_API_KEY:!!process.env.GEMINI_API_KEY,envKeysWithAPI:Object.keys(process.env||{}).filter((k)=>k.includes('API')||k.includes('GEMINI'))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D,E'})}).catch(()=>{});
+    // #endregion
     if (!apiKey) {
       console.error("API_KEY not set");
       return {
@@ -55,46 +57,20 @@ export const handler: Handler = async (event, context) => {
 
     console.log("Calling Gemini API with model:", TEXT_MODEL);
     console.log("Prompt length:", prompt.length);
-    
-    const ai = new GoogleGenAI({ apiKey });
-    const startTime = Date.now();
-    console.log("Making API call...");
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-    });
-    const duration = Date.now() - startTime;
-    console.log(`API call completed in ${duration}ms`);
-    console.log("Response type:", typeof response);
-    console.log("Response keys:", Object.keys(response || {}));
 
-    // Extract text from response - try multiple formats
-    let text = "";
-    if ((response as any)?.text) {
-      text = String((response as any).text);
-      console.log("Got text from response.text");
-    } else if ((response as any)?.response?.text) {
-      const textMethod = (response as any).response.text;
-      text = typeof textMethod === "function" ? String(textMethod()) : String(textMethod);
-      console.log("Got text from response.response.text()");
-    } else if ((response as any)?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      text = String((response as any).candidates[0].content.parts[0].text);
-      console.log("Got text from response.candidates[0].content.parts[0].text");
-    } else {
-      console.error("Could not extract text from response:", JSON.stringify(response, null, 2));
-      throw new Error("Could not extract text from API response");
+    // #region agent log - direct fetch diagnostic (hypothesis B): use same request as curl
+    const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})});
+    fetch('http://127.0.0.1:7243/ingest/c834aa7f-5a21-4ef4-aa2d-4f530770aaf0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-text.ts:directFetch',message:'Direct fetch to Gemini API',data:{status:directRes.status,ok:directRes.ok},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    if (directRes.ok) {
+      const directData = await directRes.json();
+      const text = directData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      fetch('http://127.0.0.1:7243/ingest/c834aa7f-5a21-4ef4-aa2d-4f530770aaf0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-text.ts:directFetchSuccess',message:'Direct fetch succeeded, bypassing SDK',data:{textLen:text.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+      return { statusCode: 200, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } as Record<string, string>, body: JSON.stringify({ text: String(text || "") }) };
     }
-    
-    console.log("Extracted text length:", text.length);
-
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Content-Type": "application/json",
-      } as Record<string, string>,
-      body: JSON.stringify({ text: String(text || "") }),
-    };
+    const errBody = await directRes.text();
+    fetch('http://127.0.0.1:7243/ingest/c834aa7f-5a21-4ef4-aa2d-4f530770aaf0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-text.ts:directFetchFail',message:'Direct fetch failed',data:{status:directRes.status,errBodySlice:errBody.slice(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D'})}).catch(()=>{});
+    throw new Error(errBody || `HTTP ${directRes.status}`);
+    // #endregion
   } catch (error: any) {
     console.error("Error generating text:", error);
     return {

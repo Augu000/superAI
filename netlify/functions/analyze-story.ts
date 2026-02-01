@@ -1,5 +1,4 @@
 import { Handler } from "@netlify/functions";
-import { GoogleGenAI, Type } from "@google/genai";
 
 const TEXT_MODEL = "gemini-3-flash-preview";
 
@@ -51,38 +50,25 @@ export const handler: Handler = async (event, context) => {
     }
 
     const combined = prompts.filter((p: string) => p.trim().length > 0).join("\n");
+    const promptText = `Analyze these narrative scenes and determine a catchy cinematic title and a specific visual style for the typography that matches the theme (e.g., "weathered pirate wood", "neon high-tech pulse", "medieval forged iron", "elegant victorian gold").\n\nNarrative Context:\n${combined}\n\nRespond with valid JSON: {"title": "...", "visualStyle": "..."}`;
 
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text:
-                `Analyze these narrative scenes and determine a catchy cinematic title and a specific visual style for the typography that matches the theme ` +
-                `(e.g., "weathered pirate wood", "neon high-tech pulse", "medieval forged iron", "elegant victorian gold").\n\n` +
-                `Narrative Context:\n${combined}`,
-            },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "Maximum 5 words." },
-            visualStyle: { type: Type.STRING, description: "Description of the font's material, texture, and energy." },
-          },
-          required: ["title", "visualStyle"],
-        },
-      },
+    const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: promptText }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
     });
+    if (!directRes.ok) {
+      const errBody = await directRes.text();
+      throw new Error(errBody || `HTTP ${directRes.status}`);
+    }
+    const directData = await directRes.json();
+    const rawText = directData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
 
     try {
-      const data = JSON.parse(response.text || "{}");
+      const data = JSON.parse(rawText || "{}");
       return {
         statusCode: 200,
         headers: {
