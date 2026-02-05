@@ -1,45 +1,56 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 
-// Async config for dynamic Netlify plugin; cast needed for TS (UserConfigExport overload)
-export default defineConfig((async () => {
+export default defineConfig(async () => {
+  // Try to load Netlify's Vite plugin if present.
+  // If missing/broken, Netlify Dev will still proxy the frontend + run functions.
   let netlifyPlugin: unknown = null;
+
   try {
-    const mod = await import('@netlify/vite-plugin');
-    const fn = (mod as { default?: unknown }).default ?? mod;
-    netlifyPlugin = typeof fn === 'function' ? (fn as () => unknown)() : fn;
+    const mod = await import("@netlify/vite-plugin");
+    const candidate = (mod as { default?: unknown }).default ?? mod;
+    netlifyPlugin = typeof candidate === "function" ? (candidate as () => unknown)() : candidate;
   } catch {
-    // @netlify/vite-plugin missing or broken; Netlify Dev will still proxy + run functions
+    netlifyPlugin = null;
   }
 
   return {
     plugins: [
-      react({ jsxRuntime: 'automatic' }),
-      ...(netlifyPlugin != null ? [netlifyPlugin] : []),
+      react({ jsxRuntime: "automatic" }),
+
+      ...(netlifyPlugin ? [netlifyPlugin as any] : []),
+
+      // Write SPA redirects for production build only.
       {
-        name: 'netlify-redirects',
+        name: "netlify-redirects",
+        apply: "build",
         closeBundle() {
-          writeFileSync(join(__dirname, 'dist', '_redirects'), '/*    /index.html   200\n');
+          const distDir = join(__dirname, "dist");
+          mkdirSync(distDir, { recursive: true });
+          writeFileSync(join(distDir, "_redirects"), "/*    /index.html   200\n", "utf8");
         },
       },
     ],
+
     build: {
-      outDir: 'dist',
+      outDir: "dist",
       rollupOptions: {
         input: {
-          main: './index.html',
+          main: "./index.html",
         },
       },
     },
+
     server: {
       port: 3000,
       strictPort: false,
     },
+
     optimizeDeps: {
-      exclude: ['index.html'],
-      include: ['react', 'react-dom'],
+      exclude: ["index.html"],
+      include: ["react", "react-dom"],
     },
   };
-}) as Parameters<typeof defineConfig>[0]);
+});

@@ -69,7 +69,7 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, spreadNumber, onUpda
           <div className="flex items-center gap-3">
             {step.type !== 'cover' && (
               <div className="flex items-center gap-1 bg-slate-950/50 rounded-lg p-0.5 border border-white/5">
-                {(['none', 'left', 'right'] as const).map(side => (
+                {(['none', 'left', 'right', 'center'] as const).map(side => (
                   <button
                     key={side}
                     onClick={() => onUpdate(step.id, { textSide: side })}

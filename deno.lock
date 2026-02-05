@@ -12,14 +12,22 @@
     "packageJson": {
       "dependencies": [
         "npm:@google/genai@^1.38.0",
+        "npm:@netlify/blobs@^10.5.0",
         "npm:@netlify/functions@^2.4.1",
+        "npm:@netlify/vite-plugin@1",
+        "npm:@tailwindcss/postcss@^4.1.18",
         "npm:@types/react-dom@19",
         "npm:@types/react@19",
         "npm:@types/uuid@10",
         "npm:@vitejs/plugin-react@^4.3.4",
+        "npm:autoprefixer@^10.4.23",
+        "npm:cross-env@^10.1.0",
         "npm:netlify-cli@^23.13.5",
+        "npm:postcss@^8.5.6",
         "npm:react-dom@19",
         "npm:react@19",
+        "npm:rimraf@^6.1.2",
+        "npm:tailwindcss@^4.1.18",
         "npm:typescript@^5.7.2",
         "npm:uuid@13",
         "npm:vite@^6.0.5"

@@ -1,6 +1,10 @@
-// Use relative path so app and functions are same-origin (no CORS).
-// Run "npm run dev:netlify" and open http://localhost:8888 (not :3000).
-const getApiBaseUrl = () => "/.netlify/functions";
+// Use localhost:5000 for local dev, or relative path for production/netlify
+const getApiBaseUrl = () => {
+  if (typeof window !== "undefined" && (import.meta as any).env.DEV) {
+    return "http://localhost:5000";
+  }
+  return "/.netlify/functions";
+};
 
 export type Gender = "boy" | "girl" | "neutral";
 

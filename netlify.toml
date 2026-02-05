@@ -15,12 +15,11 @@
 [functions."generate-text"]
   timeout = 60
 
-# Sync endpoint: enqueues job and returns 202 { jobId }; client polls image-status
 [functions."generate-image"]
-  timeout = 10
+  timeout = 300
 
-# Background worker runs Gemini (up to 15 min); result stored in Blobs, read via image-status
-# [functions."generate-image-worker-background"] is auto-detected by -background suffix
+[functions."image-status"]
+  timeout = 10
 
 # SPA redirect is in dist/_redirects (generated at build time) so Netlify Dev
 # does not rewrite /index.tsx and /@vite/* to index.html (which caused empty MIME type).
