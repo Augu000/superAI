@@ -237,7 +237,7 @@ app.post("/generate-image", async (req, res) => {
         body: JSON.stringify({
           contents: [{ parts }],
           generationConfig: {
-            responseModalities: ["TEXT", "IMAGE"],
+            responseModalities: ["IMAGE"],
             imageConfig: {
               aspectRatio,
               imageSize,
@@ -263,7 +263,15 @@ app.post("/generate-image", async (req, res) => {
       }
     }
 
-    return res.status(500).json({ error: "No image returned" });
+    const partsText = (data.candidates?.[0]?.content?.parts || [])
+      .map((p: any) => p?.text)
+      .filter(Boolean);
+    return res.status(500).json({
+      error: "No image returned",
+      reason: data.candidates?.[0]?.finishReason,
+      promptFeedback: data.promptFeedback,
+      text: partsText.length ? partsText.join("\n") : undefined,
+    });
   } catch (e: any) {
     console.error("Error generating image:", e);
     return res.status(500).json({ error: e.message || "Generation failed" });

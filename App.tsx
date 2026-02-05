@@ -70,8 +70,11 @@ type SpreadComposeItem = {
   stepId?: string; // which timeline step this spread corresponds to
   imageAssetId?: string; // which asset is selected
   textSide: "left" | "right" | "center" | "none";
+  textAlign?: "left" | "center" | "right";
+  textScale?: number;
   typography?: TypographySpec;
   composedDataUrl?: string; // final PNG (data:)
+  textOffset?: { x: number; y: number };
   /** to vary styling page-to-page */
   styleKey?: string;
 };
@@ -346,17 +349,38 @@ function drawWrappedText(
   y: number,
   maxWidth: number,
   lineHeightPx: number,
-  letterSpacingPx: number
+  letterSpacingPx: number,
+  align: "left" | "center" | "right"
 ) {
   const words = text.split(/\s+/).filter(Boolean);
   let line = "";
 
+  const measureLine = (s: string) => {
+    if (!letterSpacingPx) return ctx.measureText(s).width;
+    let width = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      width += ctx.measureText(ch).width;
+      if (i < s.length - 1) width += letterSpacingPx;
+    }
+    return width;
+  };
+
+  const alignStartX = (s: string) => {
+    const lineW = measureLine(s);
+    const remaining = Math.max(0, maxWidth - lineW);
+    if (align === "center") return x + remaining / 2;
+    if (align === "right") return x + remaining;
+    return x;
+  };
+
   const drawLine = (s: string, yy: number) => {
+    const startX = alignStartX(s);
     if (!letterSpacingPx) {
-      ctx.fillText(s, x, yy);
+      ctx.fillText(s, startX, yy);
       return;
     }
-    let xx = x;
+    let xx = startX;
     for (const ch of s) {
       ctx.fillText(ch, xx, yy);
       xx += ctx.measureText(ch).width + letterSpacingPx;
@@ -383,11 +407,46 @@ function drawWrappedText(
   return y;
 }
 
+function getTextBox(
+  spec: TypographySpec,
+  outputW: number,
+  outputH: number,
+  offset?: { x: number; y: number }
+) {
+  const pad = Math.round(outputW * 0.05);
+  const boxW =
+    spec.side === "center"
+      ? Math.round(outputW * 0.8)
+      : Math.round(outputW * 0.5);
+  let x0 =
+    spec.side === "center"
+      ? Math.round((outputW - boxW) / 2)
+      : spec.side === "left"
+      ? pad
+      : outputW - pad - boxW;
+  let y0 = Math.round(outputH * 0.1);
+
+  if (offset) {
+    x0 += offset.x;
+    y0 += offset.y;
+  }
+
+  x0 = clamp(x0, 0, outputW - boxW);
+  y0 = clamp(y0, 0, Math.round(outputH * 0.9));
+
+  const boxH = Math.round(outputH * 0.4);
+  return { x0, y0, boxW, boxH };
+}
+
 async function composeSpreadImage(
   imageUrl: string,
   spec: TypographySpec,
   outputW: number,
-  outputH: number
+  outputH: number,
+  offset?: { x: number; y: number },
+  align: "left" | "center" | "right" = "left",
+  scale: number = 1,
+  lineGap: number = 1
 ): Promise<string> {
   const img = await loadImage(imageUrl);
   const canvas = document.createElement("canvas");
@@ -416,35 +475,35 @@ async function composeSpreadImage(
     ctx.fillRect(0, 0, outputW, outputH);
   }
 
-  // ✅ FIX: slightly narrower text box so it feels like reference book pages
-  const pad = Math.round(outputW * 0.05);
-  const boxW =
-    spec.side === "center"
-      ? Math.round(outputW * 0.8)
-      : Math.round(outputW * 0.5);
-  const x0 =
-    spec.side === "center"
-      ? Math.round((outputW - boxW) / 2)
-      : spec.side === "left"
-      ? pad
-      : outputW - pad - boxW;
-
-  let y = Math.round(outputH * 0.1);
+  const { x0, y0, boxW } = getTextBox(spec, outputW, outputH, offset);
+  let y = y0;
 
   ctx.textBaseline = "top";
 
   // ✅ FORCE WHITE ALWAYS (even if JSON contains other colors)
   const FORCE_WHITE = "#FFFFFF";
 
+  // ✅ Calculate uniform text size (average of all blocks)
+  const uniformBaseSize = Math.round(
+    spec.blocks.reduce((sum, b) => sum + b.size, 0) / Math.max(1, spec.blocks.length)
+  );
+
   for (const block of spec.blocks) {
+    // ✅ Use uniform size for all blocks instead of different sizes
+    const scaledSize = Math.round(uniformBaseSize * scale);
+    
     if (block.kind === "headline") {
       const t = block.uppercase ? block.text.toUpperCase() : block.text;
-      ctx.font = `${block.weight} ${block.size}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
+      ctx.font = `${block.weight} ${scaledSize}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
       ctx.fillStyle = FORCE_WHITE;
 
       ctx.shadowColor = "rgba(0,0,0,0.35)";
       ctx.shadowBlur = 10;
       ctx.shadowOffsetY = 2;
+
+      // ✅ Apply lineGap multiplier to line height
+      const baseLineHeight = Math.round(scaledSize * 1.08);
+      const lineHeight = Math.round(baseLineHeight * lineGap);
 
       y = drawWrappedText(
         ctx,
@@ -452,38 +511,49 @@ async function composeSpreadImage(
         x0,
         y,
         boxW,
-        Math.round(block.size * 1.08),
-        block.letterSpacing ?? 0
+        lineHeight,
+        block.letterSpacing ?? 0,
+        align
       );
-      y += Math.round(outputH * 0.016);
+      // ✅ USE SAME GAP FOR ALL BLOCKS
+      y += Math.round(outputH * 0.008 * lineGap);
       continue;
     }
 
     if (block.kind === "emphasis") {
       const t = block.uppercase ? block.text.toUpperCase() : block.text;
-      ctx.font = `${block.weight} ${block.size}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
+      ctx.font = `${block.weight} ${scaledSize}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
       ctx.fillStyle = FORCE_WHITE;
 
       ctx.shadowColor = "rgba(0,0,0,0.35)";
       ctx.shadowBlur = 10;
       ctx.shadowOffsetY = 2;
 
-      y = drawWrappedText(ctx, t, x0, y, boxW, Math.round(block.size * 1.12), 0);
-      y += Math.round(outputH * 0.01);
+      // ✅ Apply lineGap multiplier to line height
+      const baseLineHeight = Math.round(scaledSize * 1.12);
+      const lineHeight = Math.round(baseLineHeight * lineGap);
+
+      y = drawWrappedText(ctx, t, x0, y, boxW, lineHeight, 0, align);
+      // ✅ USE SAME GAP FOR ALL BLOCKS
+      y += Math.round(outputH * 0.008 * lineGap);
       continue;
     }
 
     if (block.kind === "body") {
-      ctx.font = `${block.weight} ${block.size}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
+      ctx.font = `${block.weight} ${scaledSize}px "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI`;
       ctx.fillStyle = FORCE_WHITE;
 
       ctx.shadowColor = "rgba(0,0,0,0.28)";
       ctx.shadowBlur = 8;
       ctx.shadowOffsetY = 2;
 
-      const lh = Math.round(block.size * (block.lineHeight ?? 1.32));
-      y = drawWrappedText(ctx, block.text, x0, y, boxW, lh, 0);
-      y += Math.round(outputH * 0.008);
+      // ✅ Apply lineGap multiplier to line height
+      const baseLineHeight = Math.round(scaledSize * (block.lineHeight ?? 1.32));
+      const lineHeight = Math.round(baseLineHeight * lineGap);
+
+      y = drawWrappedText(ctx, block.text, x0, y, boxW, lineHeight, 0, align);
+      // ✅ USE SAME GAP FOR ALL BLOCKS
+      y += Math.round(outputH * 0.008 * lineGap);
     }
   }
 
@@ -949,8 +1019,12 @@ const App: React.FC = () => {
         stepId: st?.id,
         imageAssetId: defaultAsset?.id,
         textSide: defaultSide,
+        textAlign: "left",
+        textScale: 1,
+        lineGap: 1,
         typography: undefined,
         composedDataUrl: undefined,
+        textOffset: { x: 0, y: 0 },
         styleKey: styleKeyForSpread(s.spreadNumber),
       };
     });
@@ -961,6 +1035,70 @@ const App: React.FC = () => {
 
   const updateLayoutSpread = (id: string, updates: Partial<SpreadComposeItem>) => {
     setLayoutSpreads((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+  };
+
+  const textDragRef = useRef<
+    | null
+    | {
+        id: string;
+        startX: number;
+        startY: number;
+        startOffsetX: number;
+        startOffsetY: number;
+        outputW: number;
+        outputH: number;
+        previewW: number;
+        previewH: number;
+      }
+  >(null);
+
+  const beginTextDrag = (
+    spreadId: string,
+    event: React.MouseEvent<HTMLDivElement>,
+    outputW: number,
+    outputH: number,
+    currentOffset?: { x: number; y: number }
+  ) => {
+    const container = event.currentTarget.parentElement;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    textDragRef.current = {
+      id: spreadId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startOffsetX: currentOffset?.x ?? 0,
+      startOffsetY: currentOffset?.y ?? 0,
+      outputW,
+      outputH,
+      previewW: rect.width,
+      previewH: rect.height,
+    };
+
+    const handleMove = (e: MouseEvent) => {
+      const state = textDragRef.current;
+      if (!state) return;
+
+      const dx = (e.clientX - state.startX) * (state.outputW / state.previewW);
+      const dy = (e.clientY - state.startY) * (state.outputH / state.previewH);
+
+      updateLayoutSpread(state.id, {
+        textOffset: {
+          x: state.startOffsetX + dx,
+          y: state.startOffsetY + dy,
+        },
+        composedDataUrl: undefined,
+      });
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      textDragRef.current = null;
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
   };
 
   // -------- Image generation pipeline ----------
@@ -1455,7 +1593,11 @@ const App: React.FC = () => {
         { headline, subtitle }
       );
 
-      updateLayoutSpread(spread.id, { typography: normalized, styleKey });
+      updateLayoutSpread(spread.id, {
+        typography: normalized,
+        styleKey,
+        textOffset: spread.textOffset ?? { x: 0, y: 0 },
+      });
     } catch (e: any) {
       alert(`Typography generation failed: ${e?.message ?? e}`);
     } finally {
@@ -1486,7 +1628,16 @@ const App: React.FC = () => {
         { headline, subtitle }
       );
 
-      const out = await composeSpreadImage(asset.url, normalized, width, height);
+      const out = await composeSpreadImage(
+        asset.url,
+        normalized,
+        width,
+        height,
+        spread.textOffset,
+        spread.textAlign || "left",
+        spread.textScale || 1,
+        spread.lineGap || 1
+      );
       updateLayoutSpread(spread.id, { composedDataUrl: out, typography: normalized });
     } catch (e: any) {
       alert(`Compose failed: ${e?.message ?? e}`);
@@ -1662,6 +1813,11 @@ const App: React.FC = () => {
 
                 const sk = s.styleKey || styleKeyForSpread(s.spreadNumber);
                 const pal = paletteForKey(sk);
+                const { width: outputW, height: outputH } = getOutputDimensions();
+                const textBox =
+                  s.typography && s.textSide !== "none"
+                    ? getTextBox(s.typography, outputW, outputH, s.textOffset)
+                    : null;
 
                 return (
                   <div key={s.id} className="bg-slate-900/40 border border-white/5 rounded-lg p-4 space-y-3">
@@ -1692,47 +1848,153 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={s.textSide}
-                          onChange={(e) =>
-                            updateLayoutSpread(s.id, {
-                              textSide: e.target.value as any,
-                              typography: undefined,
-                              composedDataUrl: undefined,
-                            })
-                          }
-                          className="bg-slate-800 border border-white/10 text-white text-[9px] rounded px-2 py-1"
-                        >
-                          <option value="none">No text</option>
-                          <option value="left">Text left</option>
-                          <option value="right">Text right</option>
-                          <option value="center">Text center</option>
-                        </select>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={s.textSide}
+                            onChange={(e) =>
+                              updateLayoutSpread(s.id, {
+                                textSide: e.target.value as any,
+                                typography: undefined,
+                                composedDataUrl: undefined,
+                                textOffset: { x: 0, y: 0 },
+                              })
+                            }
+                            className="bg-slate-800 border border-white/10 text-white text-[9px] rounded px-2 py-1"
+                          >
+                            <option value="none">No text</option>
+                            <option value="left">Text left</option>
+                            <option value="right">Text right</option>
+                            <option value="center">Text center</option>
+                          </select>
 
-                        <button
-                          onClick={() => generateTypographyForSpread(s)}
-                          disabled={busy || s.textSide === "none"}
-                          className={`px-3 py-1 rounded font-black text-[8px] uppercase tracking-widest ${
-                            busy || s.textSide === "none"
-                              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                              : "bg-emerald-600 hover:bg-emerald-500 text-white"
-                          }`}
-                        >
-                          {busy ? "Working..." : "Typography"}
-                        </button>
+                          <button
+                            onClick={() => generateTypographyForSpread(s)}
+                            disabled={busy || s.textSide === "none"}
+                            className={`px-3 py-1 rounded font-black text-[8px] uppercase tracking-widest ${
+                              busy || s.textSide === "none"
+                                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                            }`}
+                          >
+                            {busy ? "Working..." : "Typography"}
+                          </button>
 
-                        <button
-                          onClick={() => composeImageForSpread(s)}
-                          disabled={busy || !s.imageAssetId || !s.typography || s.textSide === "none"}
-                          className={`px-3 py-1 rounded font-black text-[8px] uppercase tracking-widest ${
-                            busy || !s.imageAssetId || !s.typography || s.textSide === "none"
-                              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                              : "bg-blue-600 hover:bg-blue-500 text-white"
-                          }`}
-                        >
-                          {busy ? "..." : "Compose PNG"}
-                        </button>
+                          <button
+                            onClick={() =>
+                              updateLayoutSpread(s.id, {
+                                textOffset: { x: 0, y: 0 },
+                                composedDataUrl: undefined,
+                              })
+                            }
+                            disabled={s.textSide === "none"}
+                            className={`px-3 py-1 rounded font-black text-[8px] uppercase tracking-widest ${
+                              s.textSide === "none"
+                                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-slate-700 hover:bg-slate-600 text-white"
+                            }`}
+                            title="Reset text position"
+                          >
+                            Reset Pos
+                          </button>
+
+                          <button
+                            onClick={() => composeImageForSpread(s)}
+                            disabled={busy || !s.imageAssetId || !s.typography || s.textSide === "none"}
+                            className={`px-3 py-1 rounded font-black text-[8px] uppercase tracking-widest ${
+                              busy || !s.imageAssetId || !s.typography || s.textSide === "none"
+                                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-blue-600 hover:bg-blue-500 text-white"
+                            }`}
+                          >
+                            {busy ? "..." : "Compose PNG"}
+                          </button>
+                        </div>
+
+                        {s.textSide !== "none" && (
+                          <div className="space-y-2 bg-slate-950/40 border border-white/10 rounded p-3">
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-300 uppercase tracking-widest block">
+                                Text Alignment
+                              </label>
+                              <div className="flex items-center gap-1">
+                                {(["left", "center", "right"] as const).map((align) => (
+                                  <button
+                                    key={align}
+                                    onClick={() =>
+                                      updateLayoutSpread(s.id, {
+                                        textAlign: align,
+                                        composedDataUrl: undefined,
+                                      })
+                                    }
+                                    className={`flex-1 py-1.5 rounded font-black text-[8px] uppercase tracking-widest transition-all ${
+                                      (s.textAlign || "left") === align
+                                        ? "bg-blue-600 text-white border border-blue-500"
+                                        : "bg-slate-800 text-slate-400 border border-white/10 hover:border-white/20"
+                                    }`}
+                                    title={`Align text to ${align}`}
+                                  >
+                                    {align === "left" && "⬅"}
+                                    {align === "center" && "⬇"}
+                                    {align === "right" && "➡"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-300 uppercase tracking-widest block flex items-center justify-between">
+                                <span>Text Size</span>
+                                <span className="text-blue-400">{Math.round((s.textScale || 1) * 100)}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min="0.7"
+                                max="1.4"
+                                step="0.05"
+                                value={s.textScale || 1}
+                                onChange={(e) =>
+                                  updateLayoutSpread(s.id, {
+                                    textScale: parseFloat(e.target.value),
+                                    composedDataUrl: undefined,
+                                  })
+                                }
+                                className="w-full h-1.5 bg-slate-800 rounded appearance-none cursor-pointer accent-blue-600"
+                              />
+                              <div className="flex justify-between text-[7px] text-slate-500">
+                                <span>70%</span>
+                                <span>100%</span>
+                                <span>140%</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-300 uppercase tracking-widest block flex items-center justify-between">
+                                <span>Line Gap</span>
+                                <span className="text-blue-400">{Math.round((s.lineGap || 1) * 100)}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min="0.7"
+                                max="1.5"
+                                step="0.05"
+                                value={s.lineGap || 1}
+                                onChange={(e) =>
+                                  updateLayoutSpread(s.id, {
+                                    lineGap: parseFloat(e.target.value),
+                                    composedDataUrl: undefined,
+                                  })
+                                }
+                                className="w-full h-1.5 bg-slate-800 rounded appearance-none cursor-pointer accent-green-600"
+                              />
+                              <div className="flex justify-between text-[7px] text-slate-500">
+                                <span>Tight</span>
+                                <span>Normal</span>
+                                <span>Loose</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1774,7 +2036,28 @@ const App: React.FC = () => {
 
                         <div className="aspect-video w-full rounded overflow-hidden bg-black border border-white/5">
                           {selectedAsset?.url ? (
-                            <img src={selectedAsset.url} className="w-full h-full object-cover" alt="Selected" />
+                            <div className="w-full h-full relative">
+                              <img src={selectedAsset.url} className="w-full h-full object-cover" alt="Selected" />
+                              {textBox && s.typography && (
+                                <div className="absolute inset-0">
+                                  <div
+                                    className="absolute border border-dashed border-blue-400/70 bg-blue-500/10 text-blue-100 text-[9px] font-black uppercase tracking-widest flex items-center justify-center cursor-move select-none"
+                                    style={{
+                                      left: `${(textBox.x0 / outputW) * 100}%`,
+                                      top: `${(textBox.y0 / outputH) * 100}%`,
+                                      width: `${(textBox.boxW / outputW) * 100}%`,
+                                      height: `${(textBox.boxH / outputH) * 100}%`,
+                                    }}
+                                    onMouseDown={(e) =>
+                                      beginTextDrag(s.id, e, outputW, outputH, s.textOffset)
+                                    }
+                                    title="Drag to reposition text"
+                                  >
+                                    Text
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-slate-600 text-[9px] uppercase tracking-widest">
                               No image selected
@@ -1818,7 +2101,16 @@ const App: React.FC = () => {
                           </button>
 
                           <button
-                            onClick={() => updateLayoutSpread(s.id, { typography: undefined, composedDataUrl: undefined })}
+                            onClick={() =>
+                              updateLayoutSpread(s.id, {
+                                typography: undefined,
+                                composedDataUrl: undefined,
+                                textOffset: { x: 0, y: 0 },
+                                textAlign: "left",
+                                textScale: 1,
+                                lineGap: 1,
+                              })
+                            }
                             className="px-3 py-2 rounded font-black text-[8px] uppercase tracking-widest bg-slate-800 hover:bg-slate-700 text-white"
                             title="Clear typography + composed output"
                           >

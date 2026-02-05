@@ -144,6 +144,10 @@ export type SpreadComposeItem = {
   imageAssetId?: string;
 
   textSide: "left" | "right" | "none";
+  textAlign?: "left" | "center" | "right";
+  textScale?: number;
+  textOffset?: { x: number; y: number };
+  lineGap?: number; // multiplier for line spacing (default 1, range 0.8-1.5)
   typography?: TypographySpec;
 
   composedDataUrl?: string;
