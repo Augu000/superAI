@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:netlify": "rm -f dist/_redirects 2>/dev/null; NETLIFY_FUNCTIONS_TIMEOUT=180 netlify dev",
+    "dev:local": "concurrently -k \"npm run api\" \"vite\"",
+    "api": "node --loader ts-node/esm server/api.ts",
+    "dev:netlify": "rimraf dist/_redirects && cross-env NETLIFY_FUNCTIONS_TIMEOUT=180 netlify dev --target-port 3000",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
@@ -13,6 +15,9 @@
     "@google/genai": "^1.38.0",
     "@netlify/blobs": "^10.5.0",
     "@netlify/functions": "^2.4.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "uuid": "^13.0.0"
@@ -20,14 +25,21 @@
   "devDependencies": {
     "@netlify/vite-plugin": "^1.0.0",
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/cors": "^2.8.13",
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.3.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.23",
-    "netlify-cli": "^23.13.5",
+    "concurrently": "^9.0.1",
+    "cross-env": "^10.1.0",
+    "netlify-cli": "^23.15.1",
     "postcss": "^8.5.6",
+    "rimraf": "^6.1.2",
     "tailwindcss": "^4.1.18",
+    "ts-node": "^10.9.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
   }

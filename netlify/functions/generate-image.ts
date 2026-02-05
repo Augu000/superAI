@@ -1,115 +1,109 @@
-import { Handler } from "@netlify/functions";
-import { connectLambda, getStore } from "@netlify/blobs";
-import { v4 as uuidv4 } from "uuid";
+import type { Handler } from "@netlify/functions";
 
-const STORE_NAME = "image-generation-jobs";
-const CORS = { "Access-Control-Allow-Origin": "*" } as Record<string, string>;
-
-function getBaseUrl(event: { headers?: { [key: string]: string | undefined } }): string {
-  const url = process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (url) return url.replace(/\/$/, "");
-  const h = event.headers as Record<string, string> | undefined;
-  const host = h?.["x-forwarded-host"] || h?.host;
-  const proto = h?.["x-forwarded-proto"] || "http";
-  if (host) return `${proto}://${host}`;
-  return "http://localhost:8888";
-}
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: {
-        ...CORS,
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-      },
-      body: "",
-    };
-  }
-
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: CORS,
-      body: JSON.stringify({ error: "Method not allowed" }),
-    };
+    return { statusCode: 405, body: "Method not allowed" };
   }
 
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    return {
-      statusCode: 500,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "API_KEY environment variable is not set" }),
-    };
+    return { statusCode: 500, body: "API_KEY not set" };
   }
 
-  let prompt: string;
-  let aspectRatio: string | undefined;
-  let imageSize: string | undefined;
-  let previousImageBase64: string | undefined;
-  let characterRefBase64: string | undefined;
-  let referenceImageBase64: string | undefined;
-
+  let body;
   try {
-    const body = JSON.parse(event.body || "{}");
-    prompt = body.prompt;
-    aspectRatio = body.aspectRatio;
-    imageSize = body.imageSize;
-    previousImageBase64 = body.previousImageBase64;
-    characterRefBase64 = body.characterRefBase64;
-    referenceImageBase64 = body.referenceImageBase64;
+    body = JSON.parse(event.body || "{}");
   } catch {
-    return {
-      statusCode: 400,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Invalid JSON body" }),
-    };
+    return { statusCode: 400, body: "Invalid JSON" };
   }
 
-  if (!prompt || typeof prompt !== "string") {
-    return {
-      statusCode: 400,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Prompt is required" }),
-    };
-  }
-
-  const jobId = uuidv4();
-  const request = {
+  const {
     prompt,
-    aspectRatio,
-    imageSize,
+    aspectRatio = "16:9",
+    imageSize = "1K",
     previousImageBase64,
     characterRefBase64,
     referenceImageBase64,
-  };
+  } = body;
+
+  if (!prompt) {
+    return { statusCode: 400, body: "Prompt required" };
+  }
+
+  const parts: any[] = [];
+
+  if (referenceImageBase64) {
+    parts.push({
+      inline_data: {
+        data: referenceImageBase64.split(",")[1],
+        mime_type: "image/png",
+      },
+    });
+  }
+
+  if (characterRefBase64) {
+    parts.push({
+      inline_data: {
+        data: characterRefBase64.split(",")[1],
+        mime_type: "image/png",
+      },
+    });
+  }
+
+  if (previousImageBase64 && !referenceImageBase64) {
+    parts.push({
+      inline_data: {
+        data: previousImageBase64.split(",")[1],
+        mime_type: "image/png",
+      },
+    });
+  }
+
+  parts.push({ text: prompt });
 
   try {
-    connectLambda(event as any);
-    const store = getStore({ name: STORE_NAME, consistency: "eventual" });
-    await store.set(jobId, JSON.stringify({ status: "pending", request }));
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+            imageConfig: {
+              aspectRatio,
+              imageSize,
+            },
+          },
+        }),
+      }
+    );
 
-    const baseUrl = getBaseUrl(event);
-    const workerUrl = `${baseUrl}/.netlify/functions/generate-image-worker-background`;
-    await fetch(workerUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId }),
-    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { statusCode: 500, body: err };
+    }
 
-    return {
-      statusCode: 202,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId }),
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to enqueue job";
-    return {
-      statusCode: 500,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: message }),
-    };
+    const data = await res.json();
+
+    for (const part of data.candidates?.[0]?.content?.parts || []) {
+      const img = part.inlineData?.data ?? part.inline_data?.data;
+      if (img) {
+        return {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: `data:image/png;base64,${img}`,
+          }),
+        };
+      }
+    }
+
+    return { statusCode: 500, body: "No image returned" };
+  } catch (e: any) {
+    return { statusCode: 500, body: e.message || "Generation failed" };
   }
 };

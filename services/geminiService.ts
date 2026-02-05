@@ -5,23 +5,72 @@ type StepType = "cover" | "first" | "middle" | "last" | "title";
 type TextSide = "left" | "right" | "none";
 type CoverPart = "background" | "title" | "cast";
 
-// Use relative path so app and functions are same-origin (no CORS).
-// Run "npm run dev:netlify" and open http://localhost:8888 (not :3000).
-const getApiBaseUrl = () => "/.netlify/functions";
+// Use localhost:5000 for local dev, or relative path for production/netlify
+const getApiBaseUrl = () => {
+  if (typeof window !== "undefined" && (import.meta as any).env.DEV) {
+    return "http://localhost:5000";
+  }
+  return "/.netlify/functions";
+};
 
 const NETLIFY_DEV_MSG =
-  "Cannot reach the API. Run: npm run dev:netlify — then open http://localhost:8888 (do not use port 3000).";
+  "Cannot reach the API. Run: npm run dev:local — then open http://localhost:5173 (Vite will run on port 5173).";
 
 async function apiFetch(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, init);
   } catch (e: any) {
     const msg = e?.message || String(e);
-    if (msg.includes("Failed to fetch") || msg.includes("ERR_CONNECTION_REFUSED") || msg.includes("Load failed")) {
+    if (
+      msg.includes("Failed to fetch") ||
+      msg.includes("ERR_CONNECTION_REFUSED") ||
+      msg.includes("Load failed")
+    ) {
       throw new Error(NETLIFY_DEV_MSG);
     }
     throw e;
   }
+}
+
+/**
+ * IMPORTANT:
+ * - For SCENE / BACKGROUND artwork we must enforce a strict "NO TEXT" rule,
+ *   otherwise the image model will hallucinate or paraphrase Lithuanian copy
+ *   into the image (posters, captions, headlines, etc).
+ * - Typography layers (title/cast/ending card) are allowed to contain text.
+ */
+const NO_TEXT_RULE = `
+ABSOLUTE TEXT BAN (VERY IMPORTANT):
+- NO TEXT, NO LETTERS, NO WORDS, NO NUMBERS
+- NO TYPOGRAPHY, NO CAPTIONS, NO SUBTITLES, NO SPEECH BUBBLES
+- NO SIGNS, NO POSTERS, NO BOOK COVERS, NO WALL DECALS WITH WORDS
+- NO UI OVERLAYS, NO WATERMARKS, NO LOGOS WITH READABLE LETTERS
+- NOTHING WRITTEN ON OBJECTS (shirts, toys, drums, stickers, notebooks, etc.)
+The final image must contain ZERO readable text of any kind.
+`;
+
+/**
+ * For safe "text side" in SCENE images: we only want lighting/space hints,
+ * never actual rendered text. Layout Room will place the real text later.
+ */
+function getLegibilityHint(textSide: TextSide) {
+  if (textSide === "left") {
+    return `
+LAYOUT / NEGATIVE SPACE:
+- Keep the LEFT HALF cleaner and less detailed (soft background, fewer objects).
+- Keep the main subject and highest contrast details on the RIGHT half.
+- Add gentle vignette / darker gradient on the LEFT side for future overlay legibility.
+`;
+  }
+  if (textSide === "right") {
+    return `
+LAYOUT / NEGATIVE SPACE:
+- Keep the RIGHT HALF cleaner and less detailed (soft background, fewer objects).
+- Keep the main subject and highest contrast details on the LEFT half.
+- Add gentle vignette / darker gradient on the RIGHT side for future overlay legibility.
+`;
+  }
+  return "";
 }
 
 export class GeminiService {
@@ -36,9 +85,7 @@ export class GeminiService {
   async generateText(prompt: string): Promise<string> {
     const response = await apiFetch(`${getApiBaseUrl()}/generate-text`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
     });
 
@@ -54,9 +101,7 @@ export class GeminiService {
   async analyzeStory(prompts: string[]): Promise<{ title: string; visualStyle: string }> {
     const response = await apiFetch(`${getApiBaseUrl()}/analyze-story`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompts }),
     });
 
@@ -73,14 +118,15 @@ export class GeminiService {
   }
 
   async generateCastName(prompts: string[]): Promise<string> {
-    const combined = prompts.filter((p: string) => p.trim().length > 0).join("\n");
+    const combined = prompts.filter((p) => p.trim().length > 0).join("\n");
+
     const response = await apiFetch(`${getApiBaseUrl()}/generate-text`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        prompt: `Based on this story context, generate ONE character name (the hero/main character name) in 1-2 words maximum. Just return the name, nothing else.\n\nStory Context:\n${combined}`,
+        prompt:
+          `Based on this story context, generate ONE character name (the hero/main character name) in 1-2 words maximum. ` +
+          `Just return the name, nothing else.\n\nStory Context:\n${combined}`,
       }),
     });
 
@@ -113,124 +159,190 @@ export class GeminiService {
     },
     previousImageBase64?: string,
     characterRefBase64?: string,
-    referenceImageBase64?: string // For regeneration - maintains same composition with edits
+    referenceImageBase64?: string
   ): Promise<string> {
-    const ruleContext =
-      globalRules.length > 0 ? `Visual Style Requirements: ${globalRules.join(", ")}. ` : "";
-
-    let compositionContext = `COMPOSITION: ${config.aspectRatio} aspect ratio. `;
-
     const cleanTitle = (step.bookTitle || "UNTITLED").replace(/[*#_>`]/g, "").trim();
     const cleanCast = (step.cast || "THE HERO").replace(/[*#_>`]/g, "").trim();
     const styleDescription = step.storyStyle || "cinematic and epic";
 
+    const ruleContext =
+      globalRules.length > 0 ? `VISUAL STYLE REQUIREMENTS: ${globalRules.join(", ")}.` : "";
+
+    // Base composition context
+    let compositionContext = `COMPOSITION: ${config.aspectRatio} aspect ratio.`;
+
     // PROHIBIT ALL TECHNICAL LINES & ARTIFACTS
-    compositionContext += `IMAGE QUALITY:
-1. NO TECHNICAL MARKS: Do not render any borders, crop marks, safe zones, margins, bleed lines, or bending lines.
-2. EDGE-TO-EDGE: The artwork must be a pure, continuous image reaching all four corners. `;
+    compositionContext += `
+IMAGE QUALITY:
+1) NO TECHNICAL MARKS: Do not render borders, crop marks, safe zones, margins, bleed lines, guides, or bending lines.
+2) EDGE-TO-EDGE: Pure continuous artwork reaching all four corners (full-bleed).`;
 
-    // Demographic exclusion
+    // Demographic exclusion (keeping your current behavior)
     if (config.demographicExclusion) {
-      compositionContext += `CHARACTER DEMOGRAPHICS: Do not include any characters with dark skin tones or Black people in this image. `;
+      compositionContext += `
+CHARACTER DEMOGRAPHICS: Do not include any characters with dark skin tones or Black people in this image.`;
     }
 
-    let finalPromptText = "";
-
-    if (step.type === "cover") {
-      if (step.coverPart === "background") {
-        compositionContext += `LAYOUT: SEAMLESS WRAP-AROUND book cover background.
-ABSOLUTE PROHIBITION: DO NOT render any vertical lines, splitters, center dividers, spine creases, or bending marks. The image MUST be a single, continuous, uninterrupted landscape.
-FRONT COVER (RIGHT HALF): Position characters and main focal points in the BOTTOM-RIGHT area only.
-EXTREME NEGATIVE SPACE: The TOP 70% of the entire right side must be EMPTY and clear (only sky, atmosphere, or subtle environmental texture) to allow for manual title placement.
-SUBJECT: ${step.prompt}.`;
-
-        finalPromptText = `${ruleContext} ${compositionContext} Render the PURE BACKGROUND ARTWORK ONLY. No text, no lines, no dividers.`;
-      } else if (step.coverPart === "title") {
-        compositionContext = `COMPOSITION: Thematic Story Title Typography.
-SUBJECT: "${cleanTitle}" in a massive, stylized font.
-THEMATIC STYLE: The typography style MUST be "${styleDescription}".
-TEXTURE & MATERIAL: Use detailed ${styleDescription} textures, 3D lighting, and thematic glows.
-STRICTLY AVOID generic styles; it must look like it belongs to the world of "${cleanTitle}".
-BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
-STRICT: NO ARTWORK, NO SCENERY, NO LINES. ONLY THE THEMATIC STYLIZED TYPOGRAPHY ON BLACK.`;
-        finalPromptText = compositionContext;
-      } else if (step.coverPart === "cast") {
-        compositionContext = `COMPOSITION: Thematic Credit Typography.
-SUBJECT: "Starring: ${cleanCast}".
-THEMATIC STYLE: Font and material must match the "${styleDescription}" theme.
-BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
-STRICT: NO ARTWORK, NO SCENERY, NO BORDERS. ONLY THE STYLIZED TEXT ON BLACK.`;
-        finalPromptText = compositionContext;
-      } else {
-        // fallback (if coverPart missing)
-        finalPromptText = `${ruleContext} ${compositionContext} COVER: ${step.prompt}. Pure full-bleed cinematic artwork with no borders.`;
-      }
-    } else if (step.type === "title") {
-      // Book Title Page: use 3D Logo Prompt from Book Generator when transferred, else fallback
-      if (step.prompt && step.prompt.trim()) {
-        finalPromptText = `${ruleContext}COMPOSITION: Book Title Page. ${step.prompt.trim()} BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000). STRICT: NO SCENERY, NO BORDERS. ONLY TYPOGRAPHY ON BLACK.`;
-      } else {
-        compositionContext = `COMPOSITION: Book Title Page.
-SUBJECT: "${cleanTitle}" in massive, epic stylized typography.
-THEMATIC STYLE: Use highly stylized cinematic title design matching: "${styleDescription}". Text should be richly textured, 3D, and visually stunning.
-BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
-STRICT: NO SCENERY, NO BORDERS. ONLY THE STYLIZED TITLE ON BLACK.`;
-        finalPromptText = compositionContext;
-      }
-    } else if (step.type === "last") {
-      compositionContext = `COMPOSITION: Ending Card.
-SUBJECT: "PABAIGA" in stylized cinematic typography matching: "${styleDescription}".
-BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
-STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
-      finalPromptText = compositionContext;
-    } else {
-      const shadowSide = step.textSide === "left" ? "LEFT" : "RIGHT";
-      if (step.textSide !== "none") {
-        compositionContext += `LIGHTING: Soft cinematic vignetting on the ${shadowSide} side for text legibility. `;
-      }
-      finalPromptText = `${ruleContext} ${compositionContext} SCENE: ${step.prompt}. Pure full-bleed cinematic artwork with no borders.`;
-    }
-
+    // Identify layers where text IS allowed
     const isTypographyLayer =
       step.type === "last" ||
       step.type === "title" ||
       step.coverPart === "title" ||
       step.coverPart === "cast";
 
-    // Add image context to prompt if we have reference images
-    let enhancedPrompt = finalPromptText;
-    
-    // If regenerating with reference image, maintain composition but apply edits
-    if (referenceImageBase64 && !isTypographyLayer) {
-      enhancedPrompt = `REGENERATION MODE: This is the original image. Maintain the exact same composition, camera angle, layout, and overall structure. Apply ONLY the requested changes while keeping everything else identical.\n\n${enhancedPrompt}`;
-    }
-    
-    if (characterRefBase64 && !isTypographyLayer) {
-      enhancedPrompt = `PROTAGONIST REFERENCE: This is the hero character appearance.\n${enhancedPrompt}`;
-    }
-    if (previousImageBase64 && !isTypographyLayer && step.type !== "cover" && !referenceImageBase64) {
-      // Only use previousImage for continuity if not regenerating (regeneration uses referenceImage instead)
-      enhancedPrompt = `VISUAL CONTINUITY: Match the artistic style, color grade, and medium of this frame.\n${enhancedPrompt}`;
+    // For any non-typography artwork, hard-append NO_TEXT_RULE
+    const maybeNoText = isTypographyLayer ? "" : `\n${NO_TEXT_RULE}\n`;
+
+    let finalPromptText = "";
+
+    // ---------------- COVER ----------------
+    if (step.type === "cover") {
+      if (step.coverPart === "background") {
+        finalPromptText = `
+${ruleContext}
+${compositionContext}
+
+LAYOUT: SEAMLESS WRAP-AROUND book cover background.
+ABSOLUTE PROHIBITION: DO NOT render any vertical lines, splitters, center dividers, spine creases, or bending marks.
+The image MUST be a single, continuous, uninterrupted landscape.
+
+FRONT COVER (RIGHT HALF): Position characters and main focal points in the BOTTOM-RIGHT area only.
+EXTREME NEGATIVE SPACE: The TOP 70% of the entire right side must be EMPTY and clear
+(only sky, atmosphere, or subtle environmental texture) to allow for manual title placement later.
+
+SUBJECT / SCENE: ${step.prompt}.
+${maybeNoText}
+Render PURE BACKGROUND ARTWORK ONLY.`;
+      } else if (step.coverPart === "title") {
+        // Title typography layer: text allowed
+        finalPromptText = `
+COMPOSITION: Thematic Story Title Typography.
+SUBJECT TEXT: "${cleanTitle}" in a massive, stylized font.
+THEMATIC STYLE: Typography material/style MUST be "${styleDescription}".
+TEXTURE & MATERIAL: Detailed ${styleDescription} textures, 3D lighting, thematic glows.
+BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
+STRICT: NO ARTWORK, NO SCENERY, NO BORDERS. ONLY TYPOGRAPHY ON BLACK.`;
+      } else if (step.coverPart === "cast") {
+        // Cast typography layer: text allowed
+        finalPromptText = `
+COMPOSITION: Thematic Credit Typography.
+SUBJECT TEXT: "Starring: ${cleanCast}".
+THEMATIC STYLE: Font/material must match "${styleDescription}".
+BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
+STRICT: NO ARTWORK, NO SCENERY, NO BORDERS. ONLY THE STYLIZED TEXT ON BLACK.`;
+      } else {
+        // Fallback cover image (artwork): NO TEXT
+        finalPromptText = `
+${ruleContext}
+${compositionContext}
+COVER ARTWORK SCENE: ${step.prompt}.
+${maybeNoText}
+Pure full-bleed cinematic artwork.`;
+      }
     }
 
+    // ---------------- TITLE PAGE ----------------
+    else if (step.type === "title") {
+      // Title page is typography-only: text allowed
+      if (step.prompt && step.prompt.trim()) {
+        finalPromptText = `
+${ruleContext}
+COMPOSITION: Book Title Page.
+${step.prompt.trim()}
+BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
+STRICT: NO SCENERY, NO BORDERS. ONLY TYPOGRAPHY ON BLACK.`;
+      } else {
+        finalPromptText = `
+COMPOSITION: Book Title Page.
+SUBJECT TEXT: "${cleanTitle}" in massive, epic stylized typography.
+THEMATIC STYLE: Highly stylized cinematic title design matching "${styleDescription}".
+BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
+STRICT: NO SCENERY, NO BORDERS. ONLY THE STYLIZED TITLE ON BLACK.`;
+      }
+    }
+
+    // ---------------- LAST PAGE (ENDING CARD) ----------------
+    else if (step.type === "last") {
+      // Ending card is typography-only: text allowed
+      finalPromptText = `
+COMPOSITION: Ending Card.
+SUBJECT TEXT: "PABAIGA" in stylized cinematic typography matching "${styleDescription}".
+BACKGROUND: ABSOLUTE PURE SOLID BLACK (#000000).
+STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
+    }
+
+    // ---------------- SCENE SPREADS ----------------
+    else {
+      // SCENE artwork must never include text, even if textSide is left/right.
+      const legibilityHint = getLegibilityHint(step.textSide);
+
+      finalPromptText = `
+${ruleContext}
+${compositionContext}
+${legibilityHint}
+SCENE: ${step.prompt}.
+${maybeNoText}
+Pure full-bleed cinematic artwork.`;
+    }
+
+    // ---------- Reference/context injection ----------
+    let enhancedPrompt = finalPromptText;
+
+    // Regeneration: use reference image, but keep NO_TEXT on non-typography layers
+    if (referenceImageBase64 && !isTypographyLayer) {
+      enhancedPrompt = `EDIT MODE:
+- Use the reference image as a strong composition + character + environment anchor.
+- Apply the requested changes, but keep style consistent.
+- Do not introduce any text elements.
+
+${enhancedPrompt}`;
+    }
+
+    if (characterRefBase64 && !isTypographyLayer) {
+      enhancedPrompt = `PROTAGONIST REFERENCE:
+Use the provided reference photo for the hero's appearance/outfit identity.
+Do not change identity-defining details (hair style, clothing, silhouette).
+Do not add any text elements.
+
+${enhancedPrompt}`;
+    }
+
+    if (
+      previousImageBase64 &&
+      !isTypographyLayer &&
+      step.type !== "cover" &&
+      !referenceImageBase64
+    ) {
+      enhancedPrompt = `VISUAL CONTINUITY:
+Match the artistic style, color grade, lighting mood, and rendering medium of the previous frame.
+Do not introduce any text elements.
+
+${enhancedPrompt}`;
+    }
+
+    // ---------- Call server ----------
     try {
       const response = await apiFetch(`${getApiBaseUrl()}/generate-image`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: enhancedPrompt,
           aspectRatio: config.aspectRatio,
           imageSize: config.imageSize,
-          previousImageBase64: previousImageBase64 && !isTypographyLayer && step.type !== "cover" && !referenceImageBase64 ? previousImageBase64 : undefined,
+          previousImageBase64:
+            previousImageBase64 &&
+            !isTypographyLayer &&
+            step.type !== "cover" &&
+            !referenceImageBase64
+              ? previousImageBase64
+              : undefined,
           characterRefBase64: characterRefBase64 && !isTypographyLayer ? characterRefBase64 : undefined,
           referenceImageBase64: referenceImageBase64 && !isTypographyLayer ? referenceImageBase64 : undefined,
         }),
       });
 
       const text = await response.text();
-      if (response.status !== 202) {
+      if (!response.ok) {
         let errorMessage = `HTTP ${response.status}`;
         try {
           const json = JSON.parse(text);
@@ -241,43 +353,17 @@ STRICT: NO ARTWORK, NO BORDERS. ONLY TEXT ON BLACK.`;
         throw new Error(errorMessage);
       }
 
-      let data: { jobId?: string };
+      let data: { image?: string };
       try {
         data = JSON.parse(text);
       } catch {
         throw new Error("Invalid response from generate-image");
       }
-      const jobId = data.jobId;
-      if (!jobId) {
-        throw new Error("No jobId in response");
-      }
 
-      const pollIntervalMs = 2000;
-      const maxWaitMs = 5 * 60 * 1000;
-      const started = Date.now();
+      const image = data.image;
+      if (!image) throw new Error("No image in response");
 
-      for (;;) {
-        const statusRes = await apiFetch(
-          `${getApiBaseUrl()}/image-status?jobId=${encodeURIComponent(jobId)}`,
-          { method: "GET" }
-        );
-        const statusText = await statusRes.text();
-        if (!statusRes.ok) {
-          throw new Error(statusRes.status === 404 ? "Job not found" : statusText || `HTTP ${statusRes.status}`);
-        }
-        const statusData = JSON.parse(statusText) as { status: string; image?: string; error?: string };
-        if (statusData.status === "completed") {
-          if (statusData.image) return statusData.image;
-          throw new Error("No image data found.");
-        }
-        if (statusData.status === "error") {
-          throw new Error(statusData.error || "Image generation failed");
-        }
-        if (Date.now() - started >= maxWaitMs) {
-          throw new Error("Image generation timed out");
-        }
-        await new Promise((r) => setTimeout(r, pollIntervalMs));
-      }
+      return image;
     } catch (error: unknown) {
       console.error("Gemini Error:", error);
       throw error;
