@@ -163,7 +163,10 @@ export class GeminiService {
   ): Promise<string> {
     const cleanTitle = (step.bookTitle || "UNTITLED").replace(/[*#_>`]/g, "").trim();
     const cleanCast = (step.cast || "THE HERO").replace(/[*#_>`]/g, "").trim();
-    const styleDescription = step.storyStyle || "cinematic and epic";
+    // Unified visual style for all artwork (cover + spreads)
+    const styleDescription =
+      step.storyStyle ||
+      "stylized 3D animated film look (Pixar-like), soft volumetric lighting, cinematic color grading";
 
     const ruleContext =
       globalRules.length > 0 ? `VISUAL STYLE REQUIREMENTS: ${globalRules.join(", ")}.` : "";
@@ -173,9 +176,18 @@ export class GeminiService {
 
     // PROHIBIT ALL TECHNICAL LINES & ARTIFACTS
     compositionContext += `
-IMAGE QUALITY:
-1) NO TECHNICAL MARKS: Do not render borders, crop marks, safe zones, margins, bleed lines, guides, or bending lines.
-2) EDGE-TO-EDGE: Pure continuous artwork reaching all four corners (full-bleed).`;
+  IMAGE QUALITY:
+  1) NO TECHNICAL MARKS: Do not render borders, crop marks, safe zones, margins, bleed lines, guides, or bending lines.
+  2) EDGE-TO-EDGE: Pure continuous artwork reaching all four corners (full-bleed).
+
+  RENDERING MEDIUM & STYLE: ${styleDescription}.
+  
+  CHARACTER & ANIMAL CONSISTENCY (ABSOLUTELY CRITICAL):
+  - The protagonist (child) must wear EXACTLY the same outfit, hair color, hair style, and facial features in EVERY image.
+  - ALL animals/pets must maintain IDENTICAL species, breed, exact coat color, exact markings, exact fur pattern, exact size, and exact body morphology across EVERY image.
+  - DO NOT change animal breed, color, or appearance under any circumstance (e.g., if a Golden Retriever appears once, it MUST be a Golden Retriever in all images with identical coat shade and all markings).
+  - Props, background objects, environmental elements must remain consistent in shape, color, and material.
+  - NO substitutions: do not swap in different animals, different colored variants, or different breed types.`;
 
     // Demographic exclusion (keeping your current behavior)
     if (config.demographicExclusion) {
@@ -199,20 +211,32 @@ CHARACTER DEMOGRAPHICS: Do not include any characters with dark skin tones or Bl
     if (step.type === "cover") {
       if (step.coverPart === "background") {
         finalPromptText = `
-${ruleContext}
-${compositionContext}
+    ${ruleContext}
+    ${compositionContext}
 
-LAYOUT: SEAMLESS WRAP-AROUND book cover background.
-ABSOLUTE PROHIBITION: DO NOT render any vertical lines, splitters, center dividers, spine creases, or bending marks.
-The image MUST be a single, continuous, uninterrupted landscape.
+    LAYOUT: SEAMLESS WRAP-AROUND book cover background (single continuous landscape across front + back).
+    ABSOLUTE PROHIBITION: DO NOT render any vertical lines, splitters, center dividers, spine creases, or bending marks.
 
-FRONT COVER (RIGHT HALF): Position characters and main focal points in the BOTTOM-RIGHT area only.
-EXTREME NEGATIVE SPACE: The TOP 70% of the entire right side must be EMPTY and clear
-(only sky, atmosphere, or subtle environmental texture) to allow for manual title placement later.
+    FRONT COVER (RIGHT HALF): Position characters and main focal points in the BOTTOM-RIGHT area only.
+    NEGATIVE SPACE FOR TITLE: The TOP 70% of the right side must remain clear (soft sky/atmosphere) for later manual title placement.
 
-SUBJECT / SCENE: ${step.prompt}.
-${maybeNoText}
-Render PURE BACKGROUND ARTWORK ONLY.`;
+    ===== RENDERING STYLE (ABSOLUTE CRITICAL) =====
+    MANDATORY: Full 3D animated cinematic rendering ONLY.
+    - Photorealistic 3D materials (cloth, skin, grass, wood, metal); absolutely NO illustration, NO hand-drawn, NO cartoon outlines or strokes.
+    - Global illumination with realistic light bouncing, volumetric atmospheric effects, depth-of-field, lens blur.
+    - PBR (physically-based rendering) shaders for consistent material appearance across all surfaces.
+    - Character anatomy fully 3D-modeled with realistic proportions (NOT sketch-like, NOT stylized proportions).
+    - Render quality IDENTICAL to interior spread pages (same model detail, same lighting temperature, same material finish).
+    
+    PROHIBITED COMPLETELY:
+    - NO 2D digital painting, NO vector art, NO flat color fills.
+    - NO illustration-style outlines, edges, or cel-shading.
+    - NO cartoon exaggeration, caricature, or hand-drawn textures.
+    - NO watercolor, gouache, or sketch aesthetic.
+
+    SUBJECT / SCENE: ${step.prompt}.
+    ${maybeNoText}
+    Render PURE BACKGROUND ARTWORK ONLY.`;
       } else if (step.coverPart === "title") {
         // Title typography layer: text allowed
         finalPromptText = `
@@ -299,9 +323,10 @@ ${enhancedPrompt}`;
     }
 
     if (characterRefBase64 && !isTypographyLayer) {
-      enhancedPrompt = `PROTAGONIST REFERENCE:
-Use the provided reference photo for the hero's appearance/outfit identity.
-Do not change identity-defining details (hair style, clothing, silhouette).
+      enhancedPrompt = `PROTAGONIST & COMPANION REFERENCE:
+Use the provided reference photo as an EXACT blueprint for the hero's appearance/outfit, hair, facial features, and ALL animals/pets visible in the reference.
+Lock in IDENTICAL breed, color, markings, size, and anatomy for all animals shown—do NOT substitute, change color, or alter the animal in any way.
+Preserve all identity-defining details (hair style, clothing, silhouette, animal type/breed/coloring).
 Do not add any text elements.
 
 ${enhancedPrompt}`;

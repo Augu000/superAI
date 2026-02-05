@@ -2401,31 +2401,127 @@ const App: React.FC = () => {
                     >
                       Download Stack
                     </button>
+                    <button
+                      onClick={() => setShowAssetGallery(true)}
+                      className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-[7px] font-black rounded uppercase tracking-widest shadow transition-all"
+                      title="Open full gallery"
+                    >
+                      Open Gallery
+                    </button>
                   </div>
                 )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 {assets
-                  .filter((a) => !a.isPending && a.url)
+                  .filter((a) => a.url || a.isPending)
                   .slice(0, 6)
                   .map((a) => (
-                    <button
+                    <div
                       key={a.id}
-                      onClick={() => downloadImage(a.url, a.label)}
-                      className="bg-slate-900/40 border border-white/5 rounded overflow-hidden text-left"
-                      title="Download"
+                      className="bg-slate-900/40 border border-white/5 rounded overflow-hidden text-left flex flex-col relative"
                     >
-                      <div className="aspect-video bg-black">
-                        <img src={a.url} className="w-full h-full object-cover" alt={a.label} />
-                      </div>
-                      <div className="p-2">
-                        <div className="text-[8px] font-black text-slate-200 uppercase truncate">{a.label}</div>
-                        <div className="text-[7px] text-slate-500 uppercase tracking-widest mt-1">
-                          {new Date(a.timestamp).toLocaleTimeString()}
+                      <button
+                        onClick={() => a.url && setSelectedAssetForPreview(a.url)}
+                        disabled={!a.url}
+                        className="aspect-video bg-black hover:opacity-80 transition-opacity relative disabled:opacity-60"
+                        title={a.url ? "Preview" : "Generating"}
+                      >
+                        {a.url ? (
+                          <img src={a.url} className="w-full h-full object-cover" alt={a.label} />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-500 uppercase tracking-widest">
+                            Generating
+                          </div>
+                        )}
+                        
+                        {/* Regeneration Loading Indicator */}
+                        {a.isPending && (
+                          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                            <div className="flex flex-col items-center gap-2">
+                              <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                              <div className="text-[7px] font-black text-blue-400 uppercase tracking-widest animate-pulse">
+                                Regenerating...
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                      <div className="p-2 space-y-2 flex-1 flex flex-col">
+                        <div>
+                          <div className="text-[8px] font-black text-slate-200 uppercase truncate">{a.label}</div>
+                          <div className="text-[7px] text-slate-500 uppercase tracking-widest mt-0.5">
+                            {new Date(a.timestamp).toLocaleTimeString()}
+                          </div>
                         </div>
+
+                        <button
+                          onClick={() => a.url && downloadImage(a.url, a.label)}
+                          disabled={!a.url || a.isPending}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                          title="Download"
+                        >
+                          Download
+                        </button>
+
+                        {/* Regeneration Controls */}
+                        {a.stepId && (
+                          <div className="space-y-1.5 pt-1 border-t border-white/10">
+                            {regeneratingAssetId === a.id ? (
+                              <div className="space-y-1.5">
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  placeholder="e.g. make it darker, add more glow"
+                                  value={regenerateEditPrompt}
+                                  onChange={(e) => setRegenerateEditPrompt(e.target.value)}
+                                  disabled={a.isPending}
+                                  className="w-full text-[7px] bg-slate-800 border border-white/10 rounded px-2 py-1 text-slate-200 placeholder-slate-500 disabled:opacity-50"
+                                />
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={() => {
+                                      setRegenerateEditPrompt("");
+                                      setRegeneratingAssetId(null);
+                                    }}
+                                    disabled={a.isPending}
+                                    className="flex-1 px-1.5 py-0.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => handleRegenerateAsset(a)}
+                                    disabled={!regenerateEditPrompt.trim() || a.isPending}
+                                    className="flex-1 px-1.5 py-0.5 bg-orange-600 hover:bg-orange-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                                  >
+                                    {a.isPending ? "Processing..." : "Edit"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => handleQuickRegenerate(a)}
+                                  disabled={a.isPending}
+                                  className="flex-1 px-1.5 py-0.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                                  title="Quick regenerate"
+                                >
+                                  Regen
+                                </button>
+                                <button
+                                  onClick={() => setRegeneratingAssetId(a.id)}
+                                  disabled={a.isPending}
+                                  className="flex-1 px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                                  title="Regenerate with edit instructions"
+                                >
+                                  Edit+Regen
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </button>
+                    </div>
                   ))}
               </div>
 
@@ -2434,6 +2530,161 @@ const App: React.FC = () => {
                   Showing latest 6 assets here. Your full gallery UI can remain unchanged if you paste it back.
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Preview Modal */}
+      {selectedAssetForPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setSelectedAssetForPreview(null)}
+        >
+          <div
+            className="relative max-w-[95vw] max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={selectedAssetForPreview}
+              alt="Asset preview"
+              className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg border border-white/10"
+            />
+            <button
+              onClick={() => setSelectedAssetForPreview(null)}
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-900 border border-white/10 text-white flex items-center justify-center hover:bg-slate-800"
+              title="Close"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Full Asset Gallery Modal */}
+      {showAssetGallery && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm"
+          onClick={() => setShowAssetGallery(false)}
+        >
+          <div
+            className="absolute inset-6 overflow-y-auto custom-scrollbar glass-panel rounded p-6 border border-white/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-black text-white uppercase tracking-widest">Asset Gallery</h3>
+              <button
+                onClick={() => setShowAssetGallery(false)}
+                className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[9px] font-black uppercase tracking-widest"
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[...assets]
+                .sort((a,b) => b.timestamp - a.timestamp)
+                .map((a) => (
+                  <div key={a.id} className="bg-slate-900/40 border border-white/5 rounded overflow-hidden flex flex-col">
+                    <button
+                      onClick={() => a.url && setSelectedAssetForPreview(a.url)}
+                      disabled={!a.url}
+                      className="aspect-video w-full bg-black relative disabled:opacity-60"
+                      title={a.url ? "Preview" : "Generating"}
+                    >
+                      {a.url ? (
+                        <img src={a.url} className="w-full h-full object-cover" alt={a.label} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-500 uppercase tracking-widest">
+                          Generating
+                        </div>
+                      )}
+                      {a.isPending && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                            <div className="text-[7px] font-black text-blue-400 uppercase tracking-widest animate-pulse">
+                              Regenerating...
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                    <div className="p-2 flex items-center justify-between">
+                      <div>
+                        <div className="text-[8px] font-black text-slate-200 uppercase truncate max-w-[180px]">{a.label}</div>
+                        <div className="text-[7px] text-slate-500 uppercase tracking-widest mt-0.5">
+                          {new Date(a.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => a.url && downloadImage(a.url, a.label)}
+                        disabled={!a.url || a.isPending}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                      >
+                        Download
+                      </button>
+                    </div>
+
+                    {/* Regeneration Controls */}
+                    {a.stepId && (
+                      <div className="px-2 pb-2 space-y-1.5 border-t border-white/10">
+                        {regeneratingAssetId === a.id ? (
+                          <div className="space-y-1.5">
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="e.g. make it darker, add more glow"
+                              value={regenerateEditPrompt}
+                              onChange={(e) => setRegenerateEditPrompt(e.target.value)}
+                              disabled={a.isPending}
+                              className="w-full text-[7px] bg-slate-800 border border-white/10 rounded px-2 py-1 text-slate-200 placeholder-slate-500 disabled:opacity-50"
+                            />
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => {
+                                  setRegenerateEditPrompt("");
+                                  setRegeneratingAssetId(null);
+                                }}
+                                disabled={a.isPending}
+                                className="flex-1 px-1.5 py-0.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => handleRegenerateAsset(a)}
+                                disabled={!regenerateEditPrompt.trim() || a.isPending}
+                                className="flex-1 px-1.5 py-0.5 bg-orange-600 hover:bg-orange-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                              >
+                                {a.isPending ? "Processing..." : "Edit"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleQuickRegenerate(a)}
+                              disabled={a.isPending}
+                              className="flex-1 px-1.5 py-0.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                              title="Quick regenerate"
+                            >
+                              Regen
+                            </button>
+                            <button
+                              onClick={() => setRegeneratingAssetId(a.id)}
+                              disabled={a.isPending}
+                              className="flex-1 px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                              title="Regenerate with edit instructions"
+                            >
+                              Edit+Regen
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
             </div>
           </div>
         </div>
