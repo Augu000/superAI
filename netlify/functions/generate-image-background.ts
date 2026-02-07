@@ -26,10 +26,21 @@ export const handler: Handler = async (event) => {
     previousImageBase64,
     characterRefBase64,
     referenceImageBase64,
+    animalRefBase64,
   } = payload;
 
   try {
     const parts: any[] = [];
+
+    // CRITICAL: Animal reference MUST be first for highest priority
+    if (animalRefBase64) {
+      parts.push({
+        inline_data: {
+          data: animalRefBase64.split(",")[1],
+          mime_type: "image/png",
+        },
+      });
+    }
 
     if (referenceImageBase64) {
       parts.push({

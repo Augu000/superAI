@@ -159,7 +159,8 @@ export class GeminiService {
     },
     previousImageBase64?: string,
     characterRefBase64?: string,
-    referenceImageBase64?: string
+    referenceImageBase64?: string,
+    animalRefBase64?: string
   ): Promise<string> {
     const cleanTitle = (step.bookTitle || "UNTITLED").replace(/[*#_>`]/g, "").trim();
     const cleanCast = (step.cast || "THE HERO").replace(/[*#_>`]/g, "").trim();
@@ -220,19 +221,23 @@ CHARACTER DEMOGRAPHICS: Do not include any characters with dark skin tones or Bl
     FRONT COVER (RIGHT HALF): Position characters and main focal points in the BOTTOM-RIGHT area only.
     NEGATIVE SPACE FOR TITLE: The TOP 70% of the right side must remain clear (soft sky/atmosphere) for later manual title placement.
 
-    ===== RENDERING STYLE (ABSOLUTE CRITICAL) =====
-    MANDATORY: Full 3D animated cinematic rendering ONLY.
-    - Photorealistic 3D materials (cloth, skin, grass, wood, metal); absolutely NO illustration, NO hand-drawn, NO cartoon outlines or strokes.
-    - Global illumination with realistic light bouncing, volumetric atmospheric effects, depth-of-field, lens blur.
-    - PBR (physically-based rendering) shaders for consistent material appearance across all surfaces.
-    - Character anatomy fully 3D-modeled with realistic proportions (NOT sketch-like, NOT stylized proportions).
-    - Render quality IDENTICAL to interior spread pages (same model detail, same lighting temperature, same material finish).
+    ===== CRITICAL: BOOK COVER VISUAL COHESION =====
+    The interior story spreads show the actual narrative in a specific visual style.
+    The cover MUST create visual continuity - it should feel like the opening to that exact same story.
     
-    PROHIBITED COMPLETELY:
-    - NO 2D digital painting, NO vector art, NO flat color fills.
-    - NO illustration-style outlines, edges, or cel-shading.
-    - NO cartoon exaggeration, caricature, or hand-drawn textures.
-    - NO watercolor, gouache, or sketch aesthetic.
+    COHESION RULES:
+    - Use GROUNDED, REALISTIC rendering, not exaggerated or theatrical
+    - Match the TONE of the story (intimate, adventurous, whimsical, etc.) based on the scene description
+    - Avoid dramatic poster-style oversaturation
+    - Keep lighting NATURAL and ATMOSPHERIC, not artificial or hyper-lit
+    - Character anatomy and proportions should be realistic, consistent with interior pages
+    - Color palette should feel like extension of the story world, not a separate artistic style
+
+    WHAT TO AVOID:
+    - Dramatic movie poster aesthetics (too dark, too moody, too cinematic)
+    - Oversaturated colors or unrealistic color grading
+    - Surreal or dreamlike elements that don't match grounded story spreads
+    - Exaggerated lighting effects or cosmic/fantastical atmosphere unless the story is explicitly fantastical
 
     SUBJECT / SCENE: ${step.prompt}.
     ${maybeNoText}
@@ -332,6 +337,62 @@ Do not add any text elements.
 ${enhancedPrompt}`;
     }
 
+    if (animalRefBase64 && !isTypographyLayer && !referenceImageBase64) {
+      enhancedPrompt = `!!!!! CRITICAL ANIMAL IDENTITY ENFORCEMENT (HIGHEST PRIORITY) !!!!!
+
+You are provided with a REFERENCE IMAGE showing the EXACT ANIMAL CHARACTER that MUST appear.
+
+=== NON-NEGOTIABLE REQUIREMENTS (ZERO DEVIATION ALLOWED) ===
+
+1. SPECIES/BREED LOCK:
+   - Use the EXACT SAME species and breed visible in the reference image
+   - DO NOT substitute ANY other breed, variety, or type
+   - If reference shows a Golden Retriever, you MUST generate a Golden Retriever
+   - If reference shows a tabby cat, you MUST generate a tabby cat
+   - ABSOLUTE MATCH REQUIRED
+
+2. COLOR/COAT IDENTITY:
+   - Match EVERY color detail: base coat, shades, tones, highlights
+   - Reproduce EXACT fur color without ANY variation
+   - NO color shifts, NO darker/lighter versions
+   - EXACT COLOR MATCH MANDATORY
+
+3. MARKINGS/PATTERNS:
+   - Copy EVERY marking, spot, stripe, patch in EXACT locations
+   - Match patterns PRECISELY - same shapes, sizes, positions
+   - NO variation in marking placement or appearance
+   - EXACT PATTERN REPLICATION REQUIRED
+
+4. PHYSICAL FEATURES:
+   - Same face structure, ear shape, eye color, nose
+   - Same body proportions, leg length, tail characteristics
+   - Same fur length and texture
+   - IDENTICAL ANATOMY MANDATORY
+
+=== WHAT YOU MAY CHANGE ===
+   - Pose and position (different from reference)
+   - Action and activity (what the animal is doing)
+   - Background and environment (completely different scene)
+   - Lighting and camera angle
+
+=== VERIFICATION BEFORE GENERATING ===
+Before creating the image, verify:
+✓ Same species? MUST BE YES
+✓ Same breed? MUST BE YES  
+✓ Same colors? MUST BE YES
+✓ Same markings in same places? MUST BE YES
+✓ Same physical features? MUST BE YES
+
+If ANY answer is NO, you MUST correct it to YES.
+
+=== SCENE DESCRIPTION ===
+${enhancedPrompt}
+
+=== FINAL REMINDER ===
+The reference image shows the CHARACTER's appearance. This is the SAME CHARACTER in a different scene.
+Maintain 100% visual identity while placing the character in the new scene described above.`;
+    }
+
     if (
       previousImageBase64 &&
       !isTypographyLayer &&
@@ -363,8 +424,16 @@ ${enhancedPrompt}`;
               : undefined,
           characterRefBase64: characterRefBase64 && !isTypographyLayer ? characterRefBase64 : undefined,
           referenceImageBase64: referenceImageBase64 && !isTypographyLayer ? referenceImageBase64 : undefined,
+          animalRefBase64:
+            animalRefBase64 && !isTypographyLayer && !referenceImageBase64
+              ? animalRefBase64
+              : undefined,
         }),
       });
+
+      if (animalRefBase64 && !isTypographyLayer && !referenceImageBase64) {
+        console.log('[Animal Ref] → Animal reference image WAS sent to API (first priority)');
+      }
 
       const text = await response.text();
       if (!response.ok) {

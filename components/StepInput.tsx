@@ -35,13 +35,15 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, spreadNumber, onUpda
     switch(step.type) {
       case 'cover': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
       case 'title': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
-      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20'; // first, middle, last = Spread 1..N
+      case 'last': return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
+      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20'; // first, middle = Spread 1..N
     }
   };
 
   const getLabel = () => {
     if (step.type === 'cover') return 'Book Cover';
     if (step.type === 'title') return 'Book Title';
+    if (step.type === 'last') return 'Ending Card';
     if (spreadNumber != null) return `Spread ${spreadNumber}`;
     if (step.type === 'first') return 'Spread 1';
     return `Spread ${index - 1}`;
@@ -67,7 +69,7 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, spreadNumber, onUpda
           </div>
 
           <div className="flex items-center gap-3">
-            {step.type !== 'cover' && (
+            {step.type !== 'cover' && step.type !== 'last' && (
               <div className="flex items-center gap-1 bg-slate-950/50 rounded-lg p-0.5 border border-white/5">
                 {(['none', 'left', 'right', 'center'] as const).map(side => (
                   <button
@@ -127,10 +129,11 @@ const StepInput: React.FC<StepInputProps> = ({ step, index, spreadNumber, onUpda
           <textarea 
             value={step.prompt} 
             onChange={e => onUpdate(step.id, { prompt: e.target.value })}
-            placeholder="Enter visual description..."
+            placeholder={step.type === 'last' ? 'Auto-generates "PABAIGA" ending card' : 'Enter visual description...'}
             className="flex-1 bg-transparent border-none focus:ring-0 text-xs text-slate-300 placeholder-slate-600 resize-none min-h-[40px] custom-scrollbar"
+            disabled={step.type === 'last'}
           />
-          {onGenerate && (step.prompt.trim() || step.type === 'title') && (
+          {onGenerate && (step.prompt.trim() || step.type === 'title' || step.type === 'last') && (
             <button
               onClick={onGenerate}
               disabled={disabled || step.status === "generating"}

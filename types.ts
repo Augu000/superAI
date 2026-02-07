@@ -85,6 +85,7 @@ export interface SavedProject {
   characterRef: string | null;
   rules: GlobalRule[];
   quickPasteText: string;
+  animalRefs?: Record<string, string>;
 
   // Layout Room snapshot (optional; for backward compatibility)
   layoutSpreads?: SpreadComposeItem[];

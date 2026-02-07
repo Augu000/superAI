@@ -244,7 +244,7 @@ function normalizeTypographySpec(
   const bodyMax = Math.round(base * 0.035);
 
   const profile = spreadNumber % 3;
-  const headlineUpper = profile === 2;
+  const headlineUpper = false; // ✅ Don't force uppercase on any spreads
   const headlineLS = profile === 0 ? 1 : 0;
 
   let headlineText = forceText?.headline ?? "";
@@ -315,7 +315,7 @@ function normalizeTypographySpec(
     blocks.push({
       kind: "emphasis",
       text: emphasisText,
-      uppercase: profile === 0,
+      uppercase: false, // ✅ Don't force uppercase on emphasis text
       size: emphasisSize,
       color: safeHexOrFallback(WHITE, pal.body),
       weight: 900,
@@ -608,6 +608,8 @@ const App: React.FC = () => {
   const [steps, setSteps] = useState<ImageStep[]>(createInitialSteps());
   const [rules, setRules] = useState<GlobalRule[]>([]);
   const [characterRef, setCharacterRef] = useState<string | null>(null);
+  const [animalRefs, setAnimalRefs] = useState<Record<string, string>>({});
+  const animalRefsRef = useRef<Record<string, string>>({});
 
   const [config, setConfig] = useState<GlobalConfig>({
     aspectRatio: "21:9",
@@ -615,6 +617,84 @@ const App: React.FC = () => {
     bleedPercent: 15,
     demographicExclusion: true,
   });
+
+  const ANIMAL_REF_RULES: Array<{ key: string; pattern: RegExp }> = [
+    { key: "dog", pattern: /\b(dog|dogs|puppy|puppies|pup|canine)\b/i },
+    { key: "cat", pattern: /\b(cat|cats|kitten|kittens|feline)\b/i },
+    { key: "rabbit", pattern: /\b(rabbit|rabbits|bunny|bunnies)\b/i },
+    { key: "horse", pattern: /\b(horse|horses|pony|ponies)\b/i },
+    { key: "fox", pattern: /\b(fox|foxes)\b/i },
+    { key: "bear", pattern: /\b(bear|bears)\b/i },
+    { key: "deer", pattern: /\b(deer)\b/i },
+    { key: "wolf", pattern: /\b(wolf|wolves)\b/i },
+    { key: "lion", pattern: /\b(lion|lions)\b/i },
+    { key: "tiger", pattern: /\b(tiger|tigers)\b/i },
+    { key: "elephant", pattern: /\b(elephant|elephants)\b/i },
+    { key: "giraffe", pattern: /\b(giraffe|giraffes)\b/i },
+    { key: "zebra", pattern: /\b(zebra|zebras)\b/i },
+    { key: "cow", pattern: /\b(cow|cows|calf|calves)\b/i },
+    { key: "pig", pattern: /\b(pig|pigs|piglet|piglets)\b/i },
+    { key: "sheep", pattern: /\b(sheep|lamb|lambs)\b/i },
+    { key: "goat", pattern: /\b(goat|goats|kid|kids)\b/i },
+    { key: "chicken", pattern: /\b(chicken|chickens|chick|chicks|hen|hens|rooster|roosters)\b/i },
+    { key: "duck", pattern: /\b(duck|ducks|duckling|ducklings)\b/i },
+    { key: "goose", pattern: /\b(goose|geese|gosling|goslings)\b/i },
+    { key: "owl", pattern: /\b(owl|owls)\b/i },
+    { key: "bird", pattern: /\b(bird|birds)\b/i },
+  ];
+
+  const detectAnimalKeys = (prompt: string): string[] => {
+    if (!prompt) return [];
+    const hits = ANIMAL_REF_RULES.filter((rule) => rule.pattern.test(prompt)).map(
+      (rule) => rule.key
+    );
+    return Array.from(new Set(hits));
+  };
+
+  const resolveAnimalReference = (prompt: string) => {
+    const keys = detectAnimalKeys(prompt);
+    const refKey = keys.find((key) => animalRefsRef.current[key]);
+    const refBase64 = refKey ? animalRefsRef.current[refKey] : undefined;
+    if (keys.length > 0) {
+      console.log(`[Animal Ref] Detected animals in prompt: [${keys.join(', ')}]`);
+      if (refKey) {
+        console.log(`[Animal Ref] ✓ Using stored image reference for: "${refKey}"`);
+        console.log(`[Animal Ref] → AI will see the reference image and match the exact breed/color/markings`);
+      } else {
+        console.log(`[Animal Ref] ⚠ No reference stored yet for: [${keys.join(', ')}]`);
+        console.log(`[Animal Ref] → This will be the FIRST image, which will be stored as reference`);
+      }
+    }
+    return { keys, refKey, refBase64 };
+  };
+
+  const rememberAnimalReferences = (keys: string[], imageUrl?: string) => {
+    if (!imageUrl || !imageUrl.startsWith("data:")) {
+      if (keys.length > 0 && imageUrl) {
+        console.log(`[Animal Ref] ⚠ WARNING: Image URL format not data: URL, can't store reference`);
+        console.log(`[Animal Ref] → Image URL starts with:`, imageUrl?.substring(0, 50));
+      }
+      return;
+    }
+    if (keys.length === 0) return;
+    
+    const stored: string[] = [];
+    keys.forEach((key) => {
+      if (!animalRefsRef.current[key]) {
+        animalRefsRef.current[key] = imageUrl;
+        stored.push(key);
+      }
+    });
+    
+    if (stored.length > 0) {
+      const sizeKB = Math.round(imageUrl.length / 1024);
+      console.log(`[Animal Ref] ✓ Stored complete image (${sizeKB}KB) as visual reference for: [${stored.join(', ')}]`);
+      console.log(`[Animal Ref] → Next images with these animals will use this as visual template`);
+      
+      // Sync to state for UI
+      setAnimalRefs({ ...animalRefsRef.current });
+    }
+  };
 
   const getOutputDimensions = (): { width: number; height: number } => {
     const [width, height] =
@@ -658,6 +738,9 @@ const App: React.FC = () => {
   const [selectedAssetForPreview, setSelectedAssetForPreview] = useState<
     string | null
   >(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(
+    null
+  );
 
   const getGemini = () => new GeminiService();
 
@@ -840,6 +923,7 @@ const App: React.FC = () => {
       assets: [...assets],
       config: { ...config },
       characterRef,
+      animalRefs: { ...animalRefs },
       rules: [...rules],
       quickPasteText,
       // @ts-ignore (backwards compatible)
@@ -864,6 +948,9 @@ const App: React.FC = () => {
     setAssets(project.assets.map((a: RenderedAsset) => ({ ...a })));
     setConfig({ ...project.config });
     setCharacterRef(project.characterRef);
+    const loadedRefs = project.animalRefs ? { ...project.animalRefs } : {};
+    animalRefsRef.current = loadedRefs;
+    setAnimalRefs(loadedRefs);
     setRules(project.rules.map((r: GlobalRule) => ({ ...r })));
     setQuickPasteText(project.quickPasteText);
 
@@ -915,13 +1002,14 @@ const App: React.FC = () => {
 
       const N = spreadChunks.length;
       const spread1Prompt = N > 0 ? cleanPrompt(spreadChunks[0]) : "";
-      const middleChunks = N > 2 ? spreadChunks.slice(1, -1) : [];
-      const lastChunkPrompt = N > 1 ? cleanPrompt(spreadChunks[N - 1]) : "";
+      // All remaining chunks (2-14) are middle spreads
+      const middleChunks = N > 1 ? spreadChunks.slice(1) : [];
 
       setSteps((prevSteps) => {
         const cover = prevSteps.find((s) => s.type === "cover")!;
         const title = prevSteps.find((s) => s.type === "title");
 
+        // Spread 1
         const firstUpdated: ImageStep = {
           id: uuidv4(),
           type: "first",
@@ -930,6 +1018,7 @@ const App: React.FC = () => {
           textSide: "left",
         };
 
+        // Spreads 2-14 (all story spreads)
         const newMiddleSteps: ImageStep[] = middleChunks.map((chunk) => ({
           id: uuidv4(),
           type: "middle" as const,
@@ -938,22 +1027,23 @@ const App: React.FC = () => {
           textSide: "none" as const,
         }));
 
-        const spreadSteps: ImageStep[] =
-          N >= 2
-            ? [
-                firstUpdated,
-                ...newMiddleSteps,
-                {
-                  id: uuidv4(),
-                  type: "last" as const,
-                  prompt: lastChunkPrompt,
-                  status: "idle" as const,
-                  textSide: "none" as const,
-                  bookTitle: "",
-                  cast: "",
-                },
-              ]
-            : [firstUpdated];
+        // Ending card (PABAIGA) - always separate, no story content
+        const endingCard: ImageStep = {
+          id: uuidv4(),
+          type: "last" as const,
+          prompt: "",
+          status: "idle" as const,
+          textSide: "none" as const,
+          bookTitle: "",
+          cast: "",
+        };
+
+        // Build final structure: all 14 story spreads + ending card
+        const allStorySteps = N > 0 
+          ? [firstUpdated, ...newMiddleSteps]
+          : [];
+
+        const spreadSteps: ImageStep[] = [...allStorySteps, endingCard];
 
         if (!title) return [cover, ...spreadSteps];
 
@@ -1112,19 +1202,28 @@ const App: React.FC = () => {
       const gemini = getGemini();
       const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
       const previousImage = index > 0 ? steps[index - 1].generatedImageUrl : undefined;
+      const { keys: animalKeys, refBase64: animalRefBase64 } = resolveAnimalReference(step.prompt);
 
       if (step.type === "cover") {
         setGenerationPhase("background");
         pendingId = addPendingAsset("Cover Background (Seamless)", step.id, step.type, "background");
+        
+        // Use first spread as visual reference if it has been generated
+        const firstSpread = steps.find((s) => s.type === "first");
+        const firstSpreadVisualRef = firstSpread?.generatedImageUrl || undefined;
+        
         const bgUrl = await gemini.generateStepImage(
           { ...step, coverPart: "background" } as any,
           ruleTexts,
           config,
-          previousImage,
-          characterRef || undefined
+          firstSpreadVisualRef, // Use first spread visual style as reference
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
         replacePendingAsset(pendingId, bgUrl, step.prompt);
+        rememberAnimalReferences(animalKeys, bgUrl);
         setSteps((prev) => prev.map((s, idx) => (idx === index ? { ...s, status: "completed" } : s)));
       } else if (step.type === "title") {
         setGenerationPhase("title");
@@ -1134,7 +1233,9 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           previousImage,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: imageUrl });
         replacePendingAsset(pendingId, imageUrl, step.bookTitle || "Book Title");
@@ -1155,12 +1256,15 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           previousImage,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         setSteps((prev) =>
           prev.map((s, idx) => (idx === index ? { ...s, status: "completed", generatedImageUrl: imageUrl } : s))
         );
         replacePendingAsset(pendingId, imageUrl, step.prompt);
+        rememberAnimalReferences(animalKeys, imageUrl);
       }
 
       setGenerationPhase("idle");
@@ -1293,6 +1397,7 @@ const App: React.FC = () => {
       const gemini = getGemini();
       const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
       const previousImage = stepIndex > 0 ? steps[stepIndex - 1].generatedImageUrl : undefined;
+      const { keys: animalKeys, refBase64: animalRefBase64 } = resolveAnimalReference(step.prompt);
 
       if (step.type === "cover") {
         setGenerationPhase("background");
@@ -1302,10 +1407,13 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           previousImage,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: bgUrl });
         replacePendingAsset(pendingId, bgUrl, step.prompt);
+        rememberAnimalReferences(animalKeys, bgUrl);
       } else if (step.type === "title") {
         setGenerationPhase("title");
         const pendingId = addPendingAsset("Book Title Page", step.id, step.type);
@@ -1314,7 +1422,9 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           previousImage,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: imageUrl });
         replacePendingAsset(pendingId, imageUrl, step.bookTitle || "Book Title");
@@ -1332,10 +1442,13 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           previousImage,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: imageUrl });
         replacePendingAsset(pendingId, imageUrl, step.prompt);
+        rememberAnimalReferences(animalKeys, imageUrl);
       }
 
       setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, status: "completed" } : s)));
@@ -1385,6 +1498,11 @@ const App: React.FC = () => {
       });
   };
 
+  const deleteAsset = (assetId: string) => {
+    setAssets((prev) => prev.filter((a) => a.id !== assetId));
+    setShowDeleteConfirm(null);
+  };
+
   // ----------------- REGENERATION CODE (UNCHANGED) -----------------
   const handleRegenerateAsset = async (asset: RenderedAsset) => {
     if (!asset.stepId || !regenerateEditPrompt.trim()) return;
@@ -1430,6 +1548,8 @@ const App: React.FC = () => {
       }
 
       let newUrl: string;
+      const promptForAnimal = asset.coverPart && asset.coverPart !== "background" ? "" : enhancedPrompt;
+      const { keys: animalKeys, refBase64: animalRefBase64 } = resolveAnimalReference(promptForAnimal);
 
       if (asset.coverPart) {
         const stepWithEdit = { ...step };
@@ -1449,7 +1569,8 @@ const App: React.FC = () => {
           config,
           undefined,
           characterRef || undefined,
-          referenceImageBase64
+          referenceImageBase64,
+          animalRefBase64
         );
 
         if (asset.coverPart === "background") updateStep(step.id, { generatedImageUrl: newUrl });
@@ -1462,9 +1583,14 @@ const App: React.FC = () => {
           config,
           undefined,
           characterRef || undefined,
-          referenceImageBase64
+          referenceImageBase64,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: newUrl });
+      }
+
+      if (!asset.coverPart || asset.coverPart === "background") {
+        rememberAnimalReferences(animalKeys, newUrl);
       }
 
       setAssets((prev) =>
@@ -1511,6 +1637,8 @@ const App: React.FC = () => {
       const ruleTexts = rules.map((r) => r.text).filter((t) => t.trim().length > 0);
 
       const originalPrompt = asset.originalPrompt || step.prompt;
+      const promptForAnimal = asset.coverPart && asset.coverPart !== "background" ? "" : originalPrompt;
+      const { keys: animalKeys, refBase64: animalRefBase64 } = resolveAnimalReference(promptForAnimal);
 
       let newUrl: string;
 
@@ -1520,7 +1648,9 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           undefined,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
 
         if (asset.coverPart === "background") updateStep(step.id, { generatedImageUrl: newUrl });
@@ -1533,9 +1663,15 @@ const App: React.FC = () => {
           ruleTexts,
           config,
           undefined,
-          characterRef || undefined
+          characterRef || undefined,
+          undefined,
+          animalRefBase64
         );
         updateStep(step.id, { generatedImageUrl: newUrl });
+      }
+
+      if (!asset.coverPart || asset.coverPart === "background") {
+        rememberAnimalReferences(animalKeys, newUrl);
       }
 
       setAssets((prev) =>
@@ -2237,6 +2373,42 @@ const App: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {Object.keys(animalRefs).length > 0 && (
+              <div className="glass-panel p-6 rounded space-y-4">
+                <h2 className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                  Animal References
+                </h2>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(animalRefs).map(([key, imgUrl]) => (
+                    <div
+                      key={key}
+                      className="group relative"
+                      title={`Reference image for ${key}`}
+                    >
+                      <div className="w-16 h-16 rounded border border-emerald-500/20 overflow-hidden bg-slate-950">
+                        <img src={imgUrl} className="w-full h-full object-cover" alt={key} />
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-emerald-600 rounded text-[7px] font-black text-white uppercase">
+                        {key}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm("Clear all stored animal references?")) {
+                      animalRefsRef.current = {};
+                      setAnimalRefs({});
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[8px] font-black uppercase tracking-widest transition-all"
+                >
+                  Clear All
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Story Timeline */}
@@ -2464,6 +2636,15 @@ const App: React.FC = () => {
                           Download
                         </button>
 
+                        <button
+                          onClick={() => setShowDeleteConfirm(a.id)}
+                          disabled={a.isPending}
+                          className="px-2 py-1 bg-red-900/30 hover:bg-red-900/50 disabled:opacity-50 text-red-300 hover:text-red-200 text-[7px] font-black rounded uppercase tracking-widest transition-colors"
+                          title="Delete"
+                        >
+                          Delete
+                        </button>
+
                         {/* Regeneration Controls */}
                         {a.stepId && (
                           <div className="space-y-1.5 pt-1 border-t border-white/10">
@@ -2563,6 +2744,38 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowDeleteConfirm(null)}
+        >
+          <div
+            className="bg-slate-900 border border-white/10 rounded p-6 max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-black text-white uppercase tracking-tight mb-2">Delete Asset?</h3>
+            <p className="text-[8px] text-slate-300 mb-4">
+              The asset "<span className="text-white font-black">{assets.find(a => a.id === showDeleteConfirm)?.label}</span>" will be permanently deleted.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-[8px] font-black rounded uppercase tracking-widest"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteAsset(showDeleteConfirm)}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-[8px] font-black rounded uppercase tracking-widest"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Full Asset Gallery Modal */}
       {showAssetGallery && (
         <div
@@ -2618,13 +2831,22 @@ const App: React.FC = () => {
                           {new Date(a.timestamp).toLocaleTimeString()}
                         </div>
                       </div>
-                      <button
-                        onClick={() => a.url && downloadImage(a.url, a.label)}
-                        disabled={!a.url || a.isPending}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
-                      >
-                        Download
-                      </button>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          onClick={() => a.url && downloadImage(a.url, a.label)}
+                          disabled={!a.url || a.isPending}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-[7px] font-black rounded uppercase tracking-widest"
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => setShowDeleteConfirm(a.id)}
+                          disabled={a.isPending}
+                          className="px-2 py-1 bg-red-900/30 hover:bg-red-900/50 disabled:opacity-50 text-red-300 hover:text-red-200 text-[7px] font-black rounded uppercase tracking-widest transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
                     {/* Regeneration Controls */}

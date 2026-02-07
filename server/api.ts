@@ -1,8 +1,16 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config({ path: ".env.local" });
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "..");
+dotenv.config({ path: path.join(projectRoot, ".env.local") });
+dotenv.config({ path: path.join(projectRoot, ".env") });
+
+const apiKeyLoaded = Boolean(process.env.API_KEY && process.env.API_KEY.trim().length > 0);
+console.log("[api] API_KEY loaded:", apiKeyLoaded ? "yes" : "no");
 
 const app = express();
 const PORT = process.env.API_PORT || 5000;
@@ -191,6 +199,7 @@ app.post("/generate-image", async (req, res) => {
     previousImageBase64,
     characterRefBase64,
     referenceImageBase64,
+    animalRefBase64,
   } = req.body;
 
   if (!prompt) {
@@ -198,6 +207,16 @@ app.post("/generate-image", async (req, res) => {
   }
 
   const parts: any[] = [];
+
+  // CRITICAL: Animal reference MUST be first for highest priority
+  if (animalRefBase64) {
+    parts.push({
+      inline_data: {
+        data: animalRefBase64.split(",")[1],
+        mime_type: "image/png",
+      },
+    });
+  }
 
   if (referenceImageBase64) {
     parts.push({
